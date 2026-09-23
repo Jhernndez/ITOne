@@ -105,3 +105,34 @@ revoke all on function public.update_platform_access(uuid, text, uuid, text, uui
 from public, anon, authenticated;
 grant execute on function public.update_platform_access(uuid, text, uuid, text, uuid)
 to authenticated;
+
+create or replace function public.remove_user_from_tenant(
+  p_user_id uuid,
+  p_tenant_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.platform_memberships
+    where user_id = auth.uid() and role = 'platform_owner'
+  ) then
+    raise exception 'Platform owner access required';
+  end if;
+
+  if p_user_id = auth.uid() then
+    raise exception 'The platform owner access cannot be removed here';
+  end if;
+
+  delete from public.tenant_memberships
+  where user_id = p_user_id and tenant_id = p_tenant_id;
+end;
+$$;
+
+revoke all on function public.remove_user_from_tenant(uuid, uuid)
+from public, anon, authenticated;
+grant execute on function public.remove_user_from_tenant(uuid, uuid)
+to authenticated;

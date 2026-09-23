@@ -347,6 +347,8 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   List<Map<String, dynamic>> _tenants = [];
   List<Map<String, dynamic>> _invitations = [];
   List<Map<String, dynamic>> _accessUsers = [];
+  final Set<String> _selectedUserIds = {};
+  Map<String, dynamic>? _selectedUser;
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -482,6 +484,72 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
   }
 
+  Future<void> _manageUserAction(String userId, String action) async {
+    try {
+      await Supabase.instance.client.functions.invoke(
+        'manage-platform-user',
+        body: {'user_id': userId, 'action': action},
+      );
+      if (mounted) {
+        setState(() => _message = action == 'reset_password'
+            ? 'Enlace de restablecimiento enviado.'
+            : 'Acción ejecutada correctamente.');
+        await _loadData();
+      }
+    } on FunctionException catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'No fue posible ejecutar la acción.\n$error');
+      }
+    }
+  }
+
+  Future<void> _removeTenantAccess(Map<String, dynamic> user) async {
+    final tenantId = user['tenant_id'] as String?;
+    if (tenantId == null) return;
+    await Supabase.instance.client.rpc(
+      'remove_user_from_tenant',
+      params: {'p_user_id': user['user_id'], 'p_tenant_id': tenantId},
+    );
+    if (mounted) {
+      setState(() => _message = 'Usuario eliminado del tenant.');
+      await _loadData();
+    }
+  }
+
+  Future<void> _confirmUserAction(
+    Map<String, dynamic> user,
+    String action,
+    String title,
+    String message,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      if (action == 'remove_tenant') {
+        await _removeTenantAccess(user);
+      } else {
+        await _manageUserAction(user['user_id'] as String, action);
+      }
+    }
+  }
+
   String _tenantName(String? id) {
     if (id == null) return 'Sin tenant específico';
     for (final tenant in _tenants) {
@@ -604,14 +672,85 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
               const SizedBox(height: 12),
               if (_accessUsers.isEmpty)
                 const Text('No hay usuarios con accesos asignados.')
-              else
-                ..._accessUsers.map(
-                  (access) => _AccessUserCard(
-                    access: access,
-                    tenants: _tenants,
-                    onSave: _updateAccess,
+              else ...[
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Seleccionar')),
+                        DataColumn(label: Text('Usuario')),
+                        DataColumn(label: Text('Correo')),
+                        DataColumn(label: Text('Plataforma')),
+                        DataColumn(label: Text('Tenant')),
+                        DataColumn(label: Text('Rol')),
+                      ],
+                      rows: _accessUsers.map((access) {
+                        final id = access['user_id'] as String;
+                        final selected = _selectedUserIds.contains(id);
+                        return DataRow(
+                          selected: selected,
+                          onSelectChanged: (value) => setState(() {
+                            if (value == true) {
+                              _selectedUserIds.add(id);
+                              _selectedUser = access;
+                            } else {
+                              _selectedUserIds.remove(id);
+                              if (_selectedUser?['user_id'] == id) {
+                                _selectedUser = null;
+                              }
+                            }
+                          }),
+                          cells: [
+                            DataCell(Checkbox(
+                              value: selected,
+                              onChanged: (value) => setState(() {
+                                if (value == true) {
+                                  _selectedUserIds.add(id);
+                                  _selectedUser = access;
+                                } else {
+                                  _selectedUserIds.remove(id);
+                                  _selectedUser = null;
+                                }
+                              }),
+                            )),
+                            DataCell(Text(id.substring(0, 8))),
+                            DataCell(Text(access['email'] as String? ?? '')),
+                            DataCell(Text(access['platform_role'] as String? ?? 'Sin acceso')),
+                            DataCell(Text(access['tenant_name'] as String? ?? 'Sin tenant')),
+                            DataCell(Text(access['tenant_role'] as String? ?? '')),
+                          ],
+                        );
+                      }).toList(),
+                    ),
                   ),
                 ),
+                if (_selectedUser != null) ...[
+                  const SizedBox(height: 16),
+                  _SelectedUserPanel(
+                    user: _selectedUser!,
+                    tenants: _tenants,
+                    onManagePermissions: () => showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Administrar permisos'),
+                        content: SizedBox(
+                          width: 560,
+                          child: _AccessUserCard(
+                            access: _selectedUser!,
+                            tenants: _tenants,
+                            onSave: _updateAccess,
+                          ),
+                        ),
+                      ),
+                    ),
+                    onAction: (action, title, message) => _confirmUserAction(
+                      _selectedUser!, action, title, message,
+                    ),
+                  ),
+                ],
+              ],
               const SizedBox(height: 36),
               Text('Invitaciones recientes',
                   style: Theme.of(context).textTheme.titleLarge),
@@ -674,6 +813,93 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     if (confirmed == true) {
       await _revokeInvitation(invitationId);
     }
+  }
+}
+
+class _SelectedUserPanel extends StatelessWidget {
+  const _SelectedUserPanel({
+    required this.user,
+    required this.tenants,
+    required this.onManagePermissions,
+    required this.onAction,
+  });
+
+  final Map<String, dynamic> user;
+  final List<Map<String, dynamic>> tenants;
+  final VoidCallback onManagePermissions;
+  final void Function(String action, String title, String message) onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final email = user['email'] as String? ?? 'Usuario';
+    final tenantName = user['tenant_name'] as String? ?? 'Sin tenant';
+    return Card(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(email, style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text('Tenant: $tenantName · Rol: ${user['tenant_role'] ?? 'Sin rol'}'),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: onManagePermissions,
+                  icon: const Icon(Icons.admin_panel_settings),
+                  label: const Text('Administrar permisos'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => onAction(
+                    'reset_password',
+                    'Restablecer contraseña',
+                    'Se enviará un enlace de restablecimiento al correo del usuario.',
+                  ),
+                  icon: const Icon(Icons.key),
+                  label: const Text('Restablecer clave'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => onAction(
+                    'disable',
+                    'Deshabilitar usuario',
+                    'El usuario no podrá iniciar sesión hasta que lo habilites nuevamente.',
+                  ),
+                  icon: const Icon(Icons.block),
+                  label: const Text('Deshabilitar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: user['tenant_id'] == null
+                      ? null
+                      : () => onAction(
+                            'remove_tenant',
+                            'Eliminar del tenant',
+                            'Se quitará el acceso de este usuario a $tenantName.',
+                          ),
+                  icon: const Icon(Icons.person_remove),
+                  label: const Text('Eliminar del tenant'),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  onPressed: () => onAction(
+                    'delete_user',
+                    'Eliminar usuario',
+                    'Esta acción elimina definitivamente la cuenta del usuario.',
+                  ),
+                  icon: const Icon(Icons.delete_forever),
+                  label: const Text('Eliminar usuario'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
