@@ -346,6 +346,7 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   String _tenantRole = 'supervisor';
   List<Map<String, dynamic>> _tenants = [];
   List<Map<String, dynamic>> _invitations = [];
+  List<Map<String, dynamic>> _accessUsers = [];
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -374,10 +375,15 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
             'id, email, platform_role, tenant_id, tenant_role, status, expires_at',
           )
           .order('created_at', ascending: false);
+      final accessUsers =
+          await client.rpc('list_platform_access') as List<dynamic>;
       if (!mounted) return;
       setState(() {
         _tenants = List<Map<String, dynamic>>.from(tenants);
         _invitations = List<Map<String, dynamic>>.from(invitations);
+        _accessUsers = accessUsers
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
         _loading = false;
       });
     } catch (error) {
@@ -446,6 +452,33 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
       if (mounted) {
         setState(() => _error = 'No fue posible cancelar la invitación.\n$error');
       }
+    }
+  }
+
+  Future<void> _updateAccess({
+    required String userId,
+    required String? platformRole,
+    required String? tenantId,
+    required String? tenantRole,
+    required String? currentTenantId,
+  }) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'update_platform_access',
+        params: {
+          'p_user_id': userId,
+          'p_platform_role': platformRole,
+          'p_tenant_id': tenantId,
+          'p_tenant_role': tenantRole,
+          'p_current_tenant_id': currentTenantId,
+        },
+      );
+      if (mounted) {
+        setState(() => _message = 'Permisos actualizados.');
+        await _loadData();
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _error = error.message);
     }
   }
 
@@ -566,6 +599,20 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                 label: Text(_sending ? 'Enviando...' : 'Enviar invitación'),
               ),
               const SizedBox(height: 36),
+              Text('Usuarios y permisos',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (_accessUsers.isEmpty)
+                const Text('No hay usuarios con accesos asignados.')
+              else
+                ..._accessUsers.map(
+                  (access) => _AccessUserCard(
+                    access: access,
+                    tenants: _tenants,
+                    onSave: _updateAccess,
+                  ),
+                ),
+              const SizedBox(height: 36),
               Text('Invitaciones recientes',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
@@ -627,6 +674,144 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     if (confirmed == true) {
       await _revokeInvitation(invitationId);
     }
+  }
+}
+
+class _AccessUserCard extends StatefulWidget {
+  const _AccessUserCard({
+    required this.access,
+    required this.tenants,
+    required this.onSave,
+  });
+
+  final Map<String, dynamic> access;
+  final List<Map<String, dynamic>> tenants;
+  final Future<void> Function({
+    required String userId,
+    required String? platformRole,
+    required String? tenantId,
+    required String? tenantRole,
+    required String? currentTenantId,
+  }) onSave;
+
+  @override
+  State<_AccessUserCard> createState() => _AccessUserCardState();
+}
+
+class _AccessUserCardState extends State<_AccessUserCard> {
+  late String? _platformRole = widget.access['platform_role'] as String?;
+  late String? _tenantId = widget.access['tenant_id'] as String?;
+  late String? _tenantRole = widget.access['tenant_role'] as String?;
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final email = widget.access['email'] as String? ?? 'Usuario';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(email, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              initialValue: _platformRole,
+              decoration: const InputDecoration(
+                labelText: 'Rol de plataforma',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Sin acceso a la plataforma'),
+                ),
+                DropdownMenuItem(
+                  value: 'platform_admin',
+                  child: Text('Administrador de plataforma'),
+                ),
+                DropdownMenuItem(
+                  value: 'platform_support',
+                  child: Text('Soporte de plataforma'),
+                ),
+              ],
+              onChanged: (value) => setState(() => _platformRole = value),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              initialValue: _tenantId,
+              decoration: const InputDecoration(
+                labelText: 'Tenant',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Sin acceso a tenant'),
+                ),
+                ...widget.tenants.map(
+                  (tenant) => DropdownMenuItem<String?>(
+                    value: tenant['id'] as String,
+                    child: Text(tenant['name'] as String),
+                  ),
+                ),
+              ],
+              onChanged: (value) => setState(() {
+                _tenantId = value;
+                if (value == null) _tenantRole = null;
+              }),
+            ),
+            if (_tenantId != null) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                initialValue: _tenantRole,
+                decoration: const InputDecoration(
+                  labelText: 'Rol dentro del tenant',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'tenant_admin',
+                    child: Text('Administrador del tenant'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'supervisor',
+                    child: Text('Supervisor'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'operator',
+                    child: Text('Operador'),
+                  ),
+                ],
+                onChanged: (value) => setState(() => _tenantRole = value),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () async {
+                        setState(() => _saving = true);
+                        await widget.onSave(
+                          userId: widget.access['user_id'] as String,
+                          platformRole: _platformRole,
+                          tenantId: _tenantId,
+                          tenantRole: _tenantRole,
+                          currentTenantId:
+                              widget.access['tenant_id'] as String?,
+                        );
+                        if (mounted) setState(() => _saving = false);
+                      },
+                icon: const Icon(Icons.save),
+                label: Text(_saving ? 'Guardando...' : 'Guardar permisos'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
