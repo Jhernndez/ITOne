@@ -61,7 +61,10 @@ Deno.serve(async (request) => {
     const { error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
       invitation.email,
       {
-        data: { platform_invitation_id: invitation.id },
+        data: {
+          platform_invitation_id: invitation.id,
+          must_set_password: true,
+        },
         redirectTo: `${supabaseUrl}/auth/v1/callback`,
       },
     );

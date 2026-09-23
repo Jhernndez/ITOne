@@ -103,6 +103,10 @@ class TenantRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user?.userMetadata?['must_set_password'] == true) {
+      return const PasswordSetupPage();
+    }
     return FutureBuilder<WorkspaceOptions>(
       future: _workspaces(),
       builder: (context, snapshot) {
@@ -337,7 +341,7 @@ class PlatformInvitationsPage extends StatefulWidget {
 
 class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   final _emailController = TextEditingController();
-  String _platformRole = 'platform_support';
+  String? _platformRole;
   String? _tenantId;
   String _tenantRole = 'supervisor';
   List<Map<String, dynamic>> _tenants = [];
@@ -482,13 +486,17 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<String?>(
                 initialValue: _platformRole,
                 decoration: const InputDecoration(
-                  labelText: 'Rol de plataforma',
+                  labelText: 'Acceso de plataforma (opcional)',
                   border: OutlineInputBorder(),
                 ),
                 items: const [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Solo acceso al tenant seleccionado'),
+                  ),
                   DropdownMenuItem(
                     value: 'platform_admin',
                     child: Text('Administrador de plataforma'),
@@ -498,7 +506,7 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                     child: Text('Soporte de plataforma'),
                   ),
                 ],
-                onChanged: (value) => setState(() => _platformRole = value!),
+                onChanged: (value) => setState(() => _platformRole = value),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String?>(
@@ -619,6 +627,120 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     if (confirmed == true) {
       await _revokeInvitation(invitationId);
     }
+  }
+}
+
+class PasswordSetupPage extends StatefulWidget {
+  const PasswordSetupPage({super.key});
+
+  @override
+  State<PasswordSetupPage> createState() => _PasswordSetupPageState();
+}
+
+class _PasswordSetupPageState extends State<PasswordSetupPage> {
+  final _passwordController = TextEditingController();
+  final _confirmationController = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final password = _passwordController.text;
+    if (password.length < 8) {
+      setState(() => _error = 'La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (password != _confirmationController.text) {
+      setState(() => _error = 'Las contraseñas no coinciden.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final user = Supabase.instance.client.auth.currentUser!;
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(
+          password: password,
+          data: {
+            ...?user.userMetadata,
+            'must_set_password': false,
+          },
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const TenantRouter()),
+      );
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'No fue posible guardar la contraseña.\n$error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Configura tu contraseña',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Este es tu primer acceso a ITONE. Define una contraseña para continuar.',
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nueva contraseña',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _confirmationController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirmar contraseña',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(_error!, style: TextStyle(color: Colors.red[700])),
+                ],
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Guardando...' : 'Continuar'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
