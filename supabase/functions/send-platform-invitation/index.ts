@@ -23,23 +23,35 @@ Deno.serve(async (request) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const userClient = createClient(
-      supabaseUrl,
-      Deno.env.get("SUPABASE_ANON_KEY") ?? serviceRoleKey,
-      { global: { headers: { Authorization: authorization } } },
-    );
-    const { data: { user } } = await userClient.auth.getUser();
+    const accessToken = authorization.replace(/^Bearer\s+/i, "").trim();
+    if (!accessToken) {
+      return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+    }
+
+    const { data: { user }, error: userError } =
+      await adminClient.auth.getUser(accessToken);
+    if (userError) {
+      console.error("Unable to validate invitation caller", userError);
+    }
     if (!user) {
       return new Response("Unauthorized", { status: 401, headers: corsHeaders });
     }
 
-    const { data: owner } = await adminClient
+    const { data: owner, error: ownerError } = await adminClient
       .from("platform_memberships")
       .select("role")
       .eq("user_id", user.id)
       .eq("role", "platform_owner")
       .maybeSingle();
+    if (ownerError) {
+      console.error("Unable to load platform membership", ownerError);
+      throw new Error("Unable to verify platform membership");
+    }
     if (!owner) {
+      console.error("Invitation caller is not a platform owner", {
+        userId: user.id,
+        email: user.email,
+      });
       return new Response("Platform owner access required", {
         status: 403,
         headers: corsHeaders,
