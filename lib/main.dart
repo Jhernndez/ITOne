@@ -226,11 +226,16 @@ class _WorkspaceCard extends StatelessWidget {
   }
 }
 
-class PlatformWorkspacePage extends StatelessWidget {
+class PlatformWorkspacePage extends StatefulWidget {
   const PlatformWorkspacePage({super.key, required this.role});
 
   final String role;
 
+  @override
+  State<PlatformWorkspacePage> createState() => _PlatformWorkspacePageState();
+}
+
+class _PlatformWorkspacePageState extends State<PlatformWorkspacePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -255,7 +260,7 @@ class PlatformWorkspacePage extends StatelessWidget {
                 Text('Administración de plataforma',
                     style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 8),
-                Text('Rol: $role'),
+                Text('Rol: ${widget.role}'),
                 const SizedBox(height: 24),
                 const Card(
                   child: ListTile(
@@ -266,17 +271,266 @@ class PlatformWorkspacePage extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Card(
+                Card(
                   child: ListTile(
                     leading: Icon(Icons.security),
                     title: Text('Accesos de plataforma'),
                     subtitle: Text(
                       'Aquí concederemos permisos específicos a administradores e ingenieros.',
                     ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PlatformInvitationsPage(),
+                      ),
+                    ),
                   ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PlatformInvitationsPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Invitar administrador o ingeniero'),
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PlatformInvitationsPage extends StatefulWidget {
+  const PlatformInvitationsPage({super.key});
+
+  @override
+  State<PlatformInvitationsPage> createState() =>
+      _PlatformInvitationsPageState();
+}
+
+class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
+  final _emailController = TextEditingController();
+  String _platformRole = 'platform_support';
+  String? _tenantId;
+  String _tenantRole = 'supervisor';
+  List<Map<String, dynamic>> _tenants = [];
+  List<Map<String, dynamic>> _invitations = [];
+  bool _loading = true;
+  bool _sending = false;
+  String? _error;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    try {
+      final client = Supabase.instance.client;
+      final tenants =
+          await client.from('tenants').select('id, name, slug').order('name');
+      final invitations = await client
+          .from('platform_invitations')
+          .select(
+            'id, email, platform_role, tenant_id, tenant_role, status, expires_at',
+          )
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() {
+        _tenants = List<Map<String, dynamic>>.from(tenants);
+        _invitations = List<Map<String, dynamic>>.from(invitations);
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'No fue posible cargar las invitaciones.\n$error';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _sendInvitation() async {
+    final email = _emailController.text.trim().toLowerCase();
+    if (!email.contains('@')) {
+      setState(() => _error = 'Escribe un correo válido.');
+      return;
+    }
+    setState(() {
+      _sending = true;
+      _error = null;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client.functions.invoke(
+        'send-platform-invitation',
+        body: {
+          'email': email,
+          'platform_role': _platformRole,
+          'tenant_id': _tenantId,
+          'tenant_role': _tenantId == null ? null : _tenantRole,
+        },
+      );
+      _emailController.clear();
+      if (mounted) {
+        setState(() => _message = 'Invitación enviada correctamente.');
+        await _loadData();
+      }
+    } on FunctionException catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'No fue posible enviar la invitación.\n$error');
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  String _tenantName(String? id) {
+    if (id == null) return 'Sin tenant específico';
+    for (final tenant in _tenants) {
+      if (tenant['id'] == id) return tenant['name'] as String;
+    }
+    return 'Tenant no disponible';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      appBar: AppBar(title: const Text('Invitaciones y accesos')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: ListView(
+            padding: const EdgeInsets.all(32),
+            children: [
+              Text('Invitar usuario',
+                  style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 8),
+              const Text(
+                'El usuario recibirá un correo y obtendrá solo los accesos que definas.',
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Correo del invitado',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: _platformRole,
+                decoration: const InputDecoration(
+                  labelText: 'Rol de plataforma',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'platform_admin',
+                    child: Text('Administrador de plataforma'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'platform_support',
+                    child: Text('Soporte de plataforma'),
+                  ),
+                ],
+                onChanged: (value) => setState(() => _platformRole = value!),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String?>(
+                initialValue: _tenantId,
+                decoration: const InputDecoration(
+                  labelText: 'Tenant autorizado (opcional)',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Sin tenant específico'),
+                  ),
+                  ..._tenants.map(
+                    (tenant) => DropdownMenuItem<String?>(
+                      value: tenant['id'] as String,
+                      child: Text(tenant['name'] as String),
+                    ),
+                  ),
+                ],
+                onChanged: (value) => setState(() => _tenantId = value),
+              ),
+              if (_tenantId != null) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: _tenantRole,
+                  decoration: const InputDecoration(
+                    labelText: 'Rol dentro del tenant',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'tenant_admin',
+                      child: Text('Administrador del tenant'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'supervisor',
+                      child: Text('Supervisor'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'operator',
+                      child: Text('Operador'),
+                    ),
+                  ],
+                  onChanged: (value) => setState(() => _tenantRole = value!),
+                ),
+              ],
+              const SizedBox(height: 20),
+              if (_error != null)
+                Text(_error!, style: TextStyle(color: Colors.red[700])),
+              if (_message != null)
+                Text(_message!, style: TextStyle(color: Colors.green[700])),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: _sending ? null : _sendInvitation,
+                icon: const Icon(Icons.send),
+                label: Text(_sending ? 'Enviando...' : 'Enviar invitación'),
+              ),
+              const SizedBox(height: 36),
+              Text('Invitaciones recientes',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (_invitations.isEmpty)
+                const Text('No hay invitaciones registradas.')
+              else
+                ..._invitations.map(
+                  (invitation) => Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.mail_outline),
+                      title: Text(invitation['email'] as String),
+                      subtitle: Text(
+                        '${invitation['platform_role']} · ${_tenantName(invitation['tenant_id'] as String?)} · ${invitation['status']}',
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
