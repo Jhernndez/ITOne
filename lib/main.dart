@@ -52,7 +52,42 @@ class AuthGate extends StatelessWidget {
         if (auth.currentSession == null) {
           return const AuthPage();
         }
-        return const TenantOnboardingPage();
+        return const TenantRouter();
+      },
+    );
+  }
+}
+
+class TenantRouter extends StatelessWidget {
+  const TenantRouter({super.key});
+
+  Future<List<Map<String, dynamic>>> _memberships() async {
+    final userId = Supabase.instance.client.auth.currentUser!.id;
+    final response = await Supabase.instance.client
+        .from('tenant_memberships')
+        .select('tenant_id, role')
+        .eq('user_id', userId);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _memberships(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return ErrorPage(
+            message: 'No fue posible cargar el espacio empresarial.',
+            onRetry: () => (context as Element).markNeedsBuild(),
+          );
+        }
+        if (snapshot.data!.isEmpty) return const TenantOnboardingPage();
+        return TenantWorkspacePage(membership: snapshot.data!.first);
       },
     );
   }
@@ -227,6 +262,15 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
     super.dispose();
   }
 
+  Future<String> _tenantIdForSlug(String slug) async {
+    final tenant = await Supabase.instance.client
+        .from('tenants')
+        .select('id')
+        .eq('slug', slug)
+        .single();
+    return tenant['id'] as String;
+  }
+
   Future<void> _createTenant() async {
     final name = _nameController.text.trim();
     final slug = _slugController.text.trim().toLowerCase();
@@ -245,8 +289,17 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
         params: {'p_name': name, 'p_slug': slug},
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Empresa creada correctamente.')),
+        final tenantId = await _tenantIdForSlug(slug);
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => TenantWorkspacePage(
+              membership: {
+                'tenant_id': tenantId,
+                'role': 'tenant_admin',
+              },
+            ),
+          ),
         );
       }
     } on PostgrestException catch (error) {
@@ -256,6 +309,7 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+
   }
 
   @override
@@ -313,6 +367,109 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class TenantWorkspacePage extends StatelessWidget {
+  const TenantWorkspacePage({super.key, required this.membership});
+
+  final Map<String, dynamic> membership;
+
+  Future<Map<String, dynamic>> _tenant() async {
+    return await Supabase.instance.client
+        .from('tenants')
+        .select('id, name, slug, created_at')
+        .eq('id', membership['tenant_id'])
+        .single();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _tenant(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return const ErrorPage(
+            message: 'No fue posible cargar los datos de la empresa.',
+          );
+        }
+        final tenant = snapshot.data!;
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(tenant['name'] as String),
+            actions: [
+              IconButton(
+                tooltip: 'Cerrar sesión',
+                onPressed: () => Supabase.instance.client.auth.signOut(),
+                icon: const Icon(Icons.logout),
+              ),
+            ],
+          ),
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Espacio empresarial',
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Este contenido pertenece exclusivamente a tu tenant.',
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 28),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.business),
+                        title: Text(tenant['name'] as String),
+                        subtitle: Text(
+                          'Identificador: ${tenant['slug']}\nRol: ${membership['role']}',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ErrorPage extends StatelessWidget {
+  const ErrorPage({super.key, required this.message, this.onRetry});
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(message),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+            ],
+          ],
         ),
       ),
     );
