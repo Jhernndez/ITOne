@@ -28,8 +28,15 @@ Deno.serve(async (request) => {
       return new Response("Unauthorized", { status: 401, headers: corsHeaders });
     }
 
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    if (!anonKey) {
+      throw new Error("Supabase anonymous key is not configured");
+    }
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    });
     const { data: { user }, error: userError } =
-      await adminClient.auth.getUser(accessToken);
+      await userClient.auth.getUser(accessToken);
     if (userError) {
       console.error("Unable to validate invitation caller", userError);
     }
@@ -37,40 +44,19 @@ Deno.serve(async (request) => {
       return new Response("Unauthorized", { status: 401, headers: corsHeaders });
     }
 
-    const { data: owner, error: ownerError } = await adminClient
-      .from("platform_memberships")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "platform_owner")
-      .maybeSingle();
-    if (ownerError) {
-      console.error("Unable to load platform membership", ownerError);
-      throw new Error("Unable to verify platform membership");
-    }
-    if (!owner) {
-      console.error("Invitation caller is not a platform owner", {
-        userId: user.id,
-        email: user.email,
-      });
-      return new Response("Platform owner access required", {
-        status: 403,
-        headers: corsHeaders,
-      });
-    }
-
     const body = await request.json();
-    const { data: invitation, error: invitationError } = await adminClient
-      .from("platform_invitations")
-      .insert({
-        email: String(body.email).trim().toLowerCase(),
-        platform_role: body.platform_role,
-        tenant_id: body.tenant_id ?? null,
-        tenant_role: body.tenant_role ?? null,
-        invited_by: user.id,
-      })
-      .select("id, email")
-      .single();
+    const { data: invitationId, error: invitationError } =
+      await userClient.rpc("create_platform_invitation", {
+        p_email: String(body.email).trim().toLowerCase(),
+        p_platform_role: body.platform_role,
+        p_tenant_id: body.tenant_id ?? null,
+        p_tenant_role: body.tenant_role ?? null,
+      });
     if (invitationError) throw invitationError;
+    const invitation = {
+      id: invitationId as string,
+      email: String(body.email).trim().toLowerCase(),
+    };
 
     const { error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
       invitation.email,
