@@ -61,19 +61,28 @@ class AuthGate extends StatelessWidget {
 class TenantRouter extends StatelessWidget {
   const TenantRouter({super.key});
 
-  Future<List<Map<String, dynamic>>> _memberships() async {
+  Future<WorkspaceOptions> _workspaces() async {
     final userId = Supabase.instance.client.auth.currentUser!.id;
-    final response = await Supabase.instance.client
+    final memberships = await Supabase.instance.client
         .from('tenant_memberships')
-        .select('tenant_id, role')
+        .select('tenant_id, role, tenants(name, slug)')
         .eq('user_id', userId);
-    return List<Map<String, dynamic>>.from(response);
+    final platformMemberships = await Supabase.instance.client
+        .from('platform_memberships')
+        .select('role')
+        .eq('user_id', userId);
+    return WorkspaceOptions(
+      tenantMemberships: List<Map<String, dynamic>>.from(memberships),
+      platformMembership: platformMemberships.isEmpty
+          ? null
+          : Map<String, dynamic>.from(platformMemberships.first),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _memberships(),
+    return FutureBuilder<WorkspaceOptions>(
+      future: _workspaces(),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(
@@ -87,9 +96,190 @@ class TenantRouter extends StatelessWidget {
             onRetry: () => (context as Element).markNeedsBuild(),
           );
         }
-        if (snapshot.data!.isEmpty) return const TenantOnboardingPage();
-        return TenantWorkspacePage(membership: snapshot.data!.first);
+        final workspaces = snapshot.data!;
+        if (workspaces.isEmpty) return const TenantOnboardingPage();
+        if (workspaces.hasMultiple) {
+          return WorkspaceSelector(workspaces: workspaces);
+        }
+        if (workspaces.platformMembership != null) {
+          return PlatformWorkspacePage(
+            role: workspaces.platformMembership!['role'] as String,
+          );
+        }
+        return TenantWorkspacePage(
+          membership: workspaces.tenantMemberships.first,
+        );
       },
+    );
+  }
+}
+
+class WorkspaceOptions {
+  const WorkspaceOptions({
+    required this.tenantMemberships,
+    required this.platformMembership,
+  });
+
+  final List<Map<String, dynamic>> tenantMemberships;
+  final Map<String, dynamic>? platformMembership;
+
+  bool get isEmpty =>
+      tenantMemberships.isEmpty && platformMembership == null;
+  bool get hasMultiple =>
+      platformMembership != null || tenantMemberships.length > 1;
+}
+
+class WorkspaceSelector extends StatelessWidget {
+  const WorkspaceSelector({super.key, required this.workspaces});
+
+  final WorkspaceOptions workspaces;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Selecciona un espacio'),
+        actions: [
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            onPressed: () => Supabase.instance.client.auth.signOut(),
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: ListView(
+            padding: const EdgeInsets.all(32),
+            shrinkWrap: true,
+            children: [
+              Text(
+                'Tus espacios de trabajo',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              const Text('Elige si deseas administrar la plataforma o una empresa.'),
+              const SizedBox(height: 24),
+              if (workspaces.platformMembership != null)
+                _WorkspaceCard(
+                  title: 'ITONE Platform',
+                  subtitle:
+                      'Administración global · Rol: ${workspaces.platformMembership!['role']}',
+                  icon: Icons.admin_panel_settings,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => PlatformWorkspacePage(
+                        role: workspaces.platformMembership!['role'] as String,
+                      ),
+                    ),
+                  ),
+                ),
+              ...workspaces.tenantMemberships.map(
+                (membership) => _WorkspaceCard(
+                  title: (membership['tenants'] as Map<String, dynamic>)['name']
+                      as String,
+                  subtitle:
+                      'Identificador: ${(membership['tenants'] as Map<String, dynamic>)['slug']} · Rol: ${membership['role']}',
+                  icon: Icons.business,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TenantWorkspacePage(
+                        membership: membership,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceCard extends StatelessWidget {
+  const _WorkspaceCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class PlatformWorkspacePage extends StatelessWidget {
+  const PlatformWorkspacePage({super.key, required this.role});
+
+  final String role;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('ITONE Platform'),
+        actions: [
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            onPressed: () => Supabase.instance.client.auth.signOut(),
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Administración de plataforma',
+                    style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 8),
+                Text('Rol: $role'),
+                const SizedBox(height: 24),
+                const Card(
+                  child: ListTile(
+                    leading: Icon(Icons.domain),
+                    title: Text('Tenants y empresas'),
+                    subtitle: Text(
+                      'Aquí administraremos empresas, módulos, licencias e integraciones.',
+                    ),
+                  ),
+                ),
+                const Card(
+                  child: ListTile(
+                    leading: Icon(Icons.security),
+                    title: Text('Accesos de plataforma'),
+                    subtitle: Text(
+                      'Aquí concederemos permisos específicos a administradores e ingenieros.',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
