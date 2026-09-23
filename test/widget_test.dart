@@ -4,7 +4,7 @@ import 'package:itone/main.dart';
 
 void main() {
   testWidgets('shows the ITONE landing page', (WidgetTester tester) async {
-    await tester.pumpWidget(const IToneApp());
+    await tester.pumpWidget(const IToneApp(supabaseConfigured: false));
 
     expect(find.text('ITONE'), findsOneWidget);
     expect(

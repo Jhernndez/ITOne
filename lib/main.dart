@@ -1,11 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
-  runApp(const IToneApp());
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabasePublishableKey =
+    String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  var supabaseConfigured = false;
+  if (_supabaseUrl.isNotEmpty && _supabasePublishableKey.isNotEmpty) {
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      publishableKey: _supabasePublishableKey,
+    );
+    supabaseConfigured = true;
+  }
+
+  runApp(IToneApp(supabaseConfigured: supabaseConfigured));
 }
 
 class IToneApp extends StatelessWidget {
-  const IToneApp({super.key});
+  const IToneApp({super.key, required this.supabaseConfigured});
+
+  final bool supabaseConfigured;
 
   @override
   Widget build(BuildContext context) {
@@ -17,13 +35,15 @@ class IToneApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const IToneHomePage(),
+      home: IToneHomePage(supabaseConfigured: supabaseConfigured),
     );
   }
 }
 
 class IToneHomePage extends StatelessWidget {
-  const IToneHomePage({super.key});
+  const IToneHomePage({super.key, required this.supabaseConfigured});
+
+  final bool supabaseConfigured;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +71,9 @@ class IToneHomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'La fundación multitenant de ITONE está lista para comenzar.',
+                  supabaseConfigured
+                      ? 'Conexión con Supabase activa. La fundación multitenant de ITONE está lista para comenzar.'
+                      : 'La fundación multitenant de ITONE está lista para comenzar.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
