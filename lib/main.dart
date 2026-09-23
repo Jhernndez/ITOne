@@ -62,15 +62,37 @@ class TenantRouter extends StatelessWidget {
   const TenantRouter({super.key});
 
   Future<WorkspaceOptions> _workspaces() async {
-    final userId = Supabase.instance.client.auth.currentUser!.id;
-    final memberships = await Supabase.instance.client
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser!;
+    final invitationId = user.userMetadata?['platform_invitation_id'];
+    final invitationAccepted =
+        user.userMetadata?['platform_invitation_accepted'] == true;
+
+    if (invitationId is String &&
+        invitationId.isNotEmpty &&
+        !invitationAccepted) {
+      await client.rpc(
+        'accept_platform_invitation',
+        params: {'p_invitation_id': invitationId},
+      );
+      await client.auth.updateUser(
+        UserAttributes(
+          data: {
+            ...?user.userMetadata,
+            'platform_invitation_accepted': true,
+          },
+        ),
+      );
+    }
+
+    final memberships = await client
         .from('tenant_memberships')
         .select('tenant_id, role, tenants(name, slug)')
-        .eq('user_id', userId);
-    final platformMemberships = await Supabase.instance.client
+        .eq('user_id', user.id);
+    final platformMemberships = await client
         .from('platform_memberships')
         .select('role')
-        .eq('user_id', userId);
+        .eq('user_id', user.id);
     return WorkspaceOptions(
       tenantMemberships: List<Map<String, dynamic>>.from(memberships),
       platformMembership: platformMemberships.isEmpty
@@ -400,6 +422,29 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
   }
 
+  Future<void> _revokeInvitation(String invitationId) async {
+    setState(() {
+      _error = null;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client.rpc(
+        'revoke_platform_invitation',
+        params: {'p_invitation_id': invitationId},
+      );
+      if (mounted) {
+        setState(() => _message = 'Invitación cancelada.');
+        await _loadData();
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'No fue posible cancelar la invitación.\n$error');
+      }
+    }
+  }
+
   String _tenantName(String? id) {
     if (id == null) return 'Sin tenant específico';
     for (final tenant in _tenants) {
@@ -520,21 +565,60 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                 const Text('No hay invitaciones registradas.')
               else
                 ..._invitations.map(
-                  (invitation) => Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.mail_outline),
-                      title: Text(invitation['email'] as String),
-                      subtitle: Text(
-                        '${invitation['platform_role']} · ${_tenantName(invitation['tenant_id'] as String?)} · ${invitation['status']}',
+                  (invitation) {
+                    final isPending = invitation['status'] == 'pending';
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.mail_outline),
+                        title: Text(invitation['email'] as String),
+                        subtitle: Text(
+                          '${invitation['platform_role']} · ${_tenantName(invitation['tenant_id'] as String?)} · ${invitation['status']}',
+                        ),
+                        trailing: isPending
+                            ? IconButton(
+                                tooltip: 'Cancelar invitación',
+                                icon: const Icon(Icons.cancel_outlined),
+                                onPressed: () => _confirmRevoke(
+                                  invitation['id'] as String,
+                                  invitation['email'] as String,
+                                ),
+                              )
+                            : null,
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmRevoke(String invitationId, String email) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar invitación'),
+        content: Text(
+          '¿Deseas cancelar la invitación enviada a $email? '
+          'El enlace dejará de ser válido.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Conservar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Cancelar invitación'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _revokeInvitation(invitationId);
+    }
   }
 }
 
