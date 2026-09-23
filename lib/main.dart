@@ -82,7 +82,8 @@ class TenantRouter extends StatelessWidget {
         }
         if (snapshot.hasError) {
           return ErrorPage(
-            message: 'No fue posible cargar el espacio empresarial.',
+            message:
+                'No fue posible cargar el espacio empresarial.\n${snapshot.error}',
             onRetry: () => (context as Element).markNeedsBuild(),
           );
         }
