@@ -75,7 +75,7 @@ class PrivacyPolicyPage extends StatelessWidget {
         title: Row(
           children: [
             Image.network(
-              '/branding/itone-logo.png',
+              '/branding/itone-logo-transparent.png',
               width: 150,
               height: 38,
               fit: BoxFit.contain,
@@ -4423,103 +4423,338 @@ class _WhatsAppBusinessInbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 24),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 480,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 320,
-              child: Column(
-                children: [
-                  Container(
-                    color: theme.colorScheme.primaryContainer,
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.chat_outlined,
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Bandeja de entrada',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Buscar conversación',
-                          onPressed: null,
-                          icon: const Icon(Icons.search),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: TextField(
-                      enabled: false,
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Buscar chats',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'Aún no hay conversaciones.\nLos nuevos mensajes aparecerán aquí.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                    ),
-                  ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showProfile = constraints.maxWidth >= 1050;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 24),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            height: 650,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: 300, child: _conversationList(theme)),
+                const VerticalDivider(width: 1),
+                Expanded(child: _conversationPanel(theme)),
+                if (showProfile) ...[
+                  const VerticalDivider(width: 1),
+                  SizedBox(width: 270, child: _contactProfile(theme)),
                 ],
-              ),
+              ],
             ),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.forum_outlined,
-                        size: 64,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Selecciona una conversación',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Aquí podrás leer y responder los mensajes de tus clientes.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _conversationList(ThemeData theme) {
+    final conversations = [
+      ('María González', 'Necesito información sobre el servicio', '10:30'),
+      ('Juan Pérez', 'Consulta sobre mi solicitud', '10:28'),
+      ('Ana Rodríguez', 'Información sobre servicios', '10:25'),
+      ('Carlos Ruiz', 'Cancelación de cita', '10:20'),
+      ('Laura Martínez', 'Nueva autorización', '10:18'),
+      ('Roberto Silva', 'Consulta pendiente', '10:15'),
+    ];
+    return Column(
+      children: [
+        Container(
+          color: theme.colorScheme.primaryContainer,
+          padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Centro de conversaciones',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onPrimaryContainer,
                   ),
                 ),
               ),
-            ),
-          ],
+              IconButton(
+                tooltip: 'Filtrar',
+                onPressed: null,
+                icon: const Icon(Icons.tune),
+              ),
+            ],
+          ),
         ),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: TextField(
+            enabled: false,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: 'Buscar conversaciones...',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              isDense: true,
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              _InboxFilter(label: 'Todas', selected: true),
+              _InboxFilter(label: 'Pendientes'),
+              _InboxFilter(label: 'Cerradas'),
+            ],
+          ),
+        ),
+        const Divider(height: 20),
+        Expanded(
+          child: ListView.separated(
+            itemCount: conversations.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final conversation = conversations[index];
+              return ListTile(
+                selected: index == 0,
+                selectedTileColor: theme.colorScheme.primaryContainer
+                    .withValues(alpha: 0.45),
+                leading: CircleAvatar(
+                  backgroundColor: theme.colorScheme.primary.withValues(
+                    alpha: 0.14,
+                  ),
+                  child: Text(conversation.$1.substring(0, 1)),
+                ),
+                title: Text(
+                  conversation.$1,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  conversation.$2,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Text(
+                  conversation.$3,
+                  style: theme.textTheme.labelSmall,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _conversationPanel(ThemeData theme) {
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+          leading: CircleAvatar(
+            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14),
+            child: const Text('M'),
+          ),
+          title: const Text(
+            'María González',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          subtitle: const Text('+57 300 123 4567 · En línea'),
+          trailing: const Icon(Icons.more_vert),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            color: const Color(0xFFF8FAFC),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _MessageBubble(
+                    text: 'Necesito información sobre el servicio',
+                    sent: true,
+                    theme: theme,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _MessageBubble(
+                    text: '¡Hola! Con gusto te ayudamos. ¿Qué servicio necesitas?',
+                    sent: false,
+                    theme: theme,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _MessageBubble(
+                    text: 'Quisiera conocer los requisitos.',
+                    sent: true,
+                    theme: theme,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Las conversaciones reales aparecerán aquí cuando se conecte el webhook.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  enabled: false,
+                  decoration: InputDecoration(
+                    hintText: 'Escribe un mensaje...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.attach_file),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.filled(
+                tooltip: 'Enviar mensaje',
+                onPressed: null,
+                icon: const Icon(Icons.send),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _contactProfile(ThemeData theme) {
+    return Column(
+      children: [
+        ListTile(
+          title: Text(
+            'Perfil del contacto',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          trailing: TextButton(onPressed: null, child: const Text('Editar')),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              CircleAvatar(
+                radius: 38,
+                backgroundColor: theme.colorScheme.primary.withValues(
+                  alpha: 0.14,
+                ),
+                child: Text(
+                  'M',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'María González',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Text('+57 300 123 4567'),
+              const SizedBox(height: 28),
+              const _ProfileValue(label: 'Estado', value: 'Pendiente'),
+              const _ProfileValue(label: 'Último contacto', value: 'Hoy'),
+              const _ProfileValue(label: 'Canal', value: 'WhatsApp'),
+              const _ProfileValue(label: 'Etiquetas', value: 'Nuevo contacto'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InboxFilter extends StatelessWidget {
+  const _InboxFilter({required this.label, this.selected = false});
+
+  final String label;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: selected ? Theme.of(context).colorScheme.primary : null,
+          fontWeight: selected ? FontWeight.bold : null,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.text,
+    required this.sent,
+    required this.theme,
+  });
+
+  final String text;
+  final bool sent;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 420),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: sent ? const Color(0xFFDFF7E5) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(color: Color(0x10000000), blurRadius: 6),
+        ],
+      ),
+      child: Text(text),
+    );
+  }
+}
+
+class _ProfileValue extends StatelessWidget {
+  const _ProfileValue({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }
