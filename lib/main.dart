@@ -3084,6 +3084,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   final _nameController = TextEditingController();
   bool _loading = true;
   bool _saving = false;
+  bool _validating = false;
   String _status = 'not_configured';
   String? _message;
 
@@ -3138,6 +3139,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
       );
       return;
     }
+
     setState(() {
       _saving = true;
       _message = null;
@@ -3165,6 +3167,39 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
       if (mounted) setState(() => _message = error.message);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _validateConnection() async {
+    setState(() {
+      _validating = true;
+      _message = null;
+    });
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'validate-whatsapp-integration',
+        body: {'tenant_id': widget.tenantId},
+      );
+      final data = Map<String, dynamic>.from(
+        (response.data as Map?) ?? const {},
+      );
+      if (mounted) {
+        setState(() {
+          _status = data['status'] as String? ?? 'error';
+          _message =
+              data['message'] as String? ??
+              'La validación terminó sin un mensaje.';
+        });
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        setState(
+          () => _message =
+              'No fue posible validar la conexión: ${error.details ?? error.reasonPhrase}',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _validating = false);
     }
   }
 
@@ -3221,6 +3256,17 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
             onPressed: _saving ? null : _save,
             icon: const Icon(Icons.save_outlined),
             label: Text(_saving ? 'Guardando...' : 'Guardar integración'),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _validating ? null : _validateConnection,
+            icon: const Icon(Icons.verified_outlined),
+            label: Text(
+              _validating ? 'Validando...' : 'Validar conexión con Meta',
+            ),
           ),
         ),
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
