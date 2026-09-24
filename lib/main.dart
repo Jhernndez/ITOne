@@ -460,24 +460,31 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
   }
 
-  Future<void> _manageUserAction(String userId, String action) async {
+  Future<bool> _manageUserAction(String userId, String action) async {
     try {
-      await Supabase.instance.client.functions.invoke(
+      final response = await Supabase.instance.client.functions.invoke(
         'manage-platform-user',
         body: {'user_id': userId, 'action': action},
       );
+      if (response.data is Map &&
+          (response.data as Map)['ok'] != true) {
+        throw Exception((response.data as Map)['error'] ?? 'La operación falló.');
+      }
       if (mounted) {
         setState(() => _message = action == 'reset_password'
             ? 'Enlace de restablecimiento enviado.'
             : 'Acción ejecutada correctamente.');
         await _loadData();
       }
+      return true;
     } on FunctionException catch (error) {
       if (mounted) setState(() => _error = error.toString());
+      return false;
     } catch (error) {
       if (mounted) {
         setState(() => _error = 'No fue posible ejecutar la acción.\n$error');
       }
+      return false;
     }
   }
 
@@ -494,7 +501,7 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
   }
 
-  Future<void> _confirmUserAction(
+  Future<bool> _confirmUserAction(
     Map<String, dynamic> user,
     String action,
     String title,
@@ -517,13 +524,12 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
         ],
       ),
     );
-    if (confirmed == true) {
-      if (action == 'remove_tenant') {
-        await _removeTenantAccess(user);
-      } else {
-        await _manageUserAction(user['user_id'] as String, action);
-      }
+    if (confirmed != true) return false;
+    if (action == 'remove_tenant') {
+      await _removeTenantAccess(user);
+      return true;
     }
+    return await _manageUserAction(user['user_id'] as String, action);
   }
 
   void _selectUser(Map<String, dynamic> user, bool? selected) {
@@ -708,7 +714,7 @@ class _UserSidePanel extends StatefulWidget {
     String? tenantId,
     String tenantRole,
   ) onInvite;
-  final Future<void> Function(
+  final Future<bool> Function(
     String action,
     String title,
     String message,
@@ -790,7 +796,7 @@ class _UserSidePanelState extends State<_UserSidePanel> {
                         label: _disabled ? 'Activar usuario' : 'Deshabilitar usuario',
                         onTap: () async {
                           final action = _disabled ? 'enable' : 'disable';
-                          await widget.onAction(
+                          final completed = await widget.onAction(
                             action,
                             _disabled
                                 ? 'Activar usuario'
@@ -799,7 +805,7 @@ class _UserSidePanelState extends State<_UserSidePanel> {
                                 ? 'El usuario podrá iniciar sesión nuevamente.'
                                 : 'El usuario no podrá iniciar sesión.',
                           );
-                          if (mounted) {
+                          if (completed && mounted) {
                             setState(() => _disabled = !_disabled);
                           }
                         },
