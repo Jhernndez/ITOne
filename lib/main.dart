@@ -3,8 +3,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-const _supabasePublishableKey =
-    String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+const _supabasePublishableKey = String.fromEnvironment(
+  'SUPABASE_PUBLISHABLE_KEY',
+);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,7 +69,8 @@ class TenantRouter extends StatelessWidget {
   Future<WorkspaceOptions> _workspaces() async {
     final client = Supabase.instance.client;
     final user = client.auth.currentUser!;
-    final disabled = await client.rpc('is_current_user_disabled') as bool? ?? false;
+    final disabled =
+        await client.rpc('is_current_user_disabled') as bool? ?? false;
     if (disabled) {
       await client.auth.signOut();
       throw const AuthException(
@@ -88,10 +90,7 @@ class TenantRouter extends StatelessWidget {
       );
       await client.auth.updateUser(
         UserAttributes(
-          data: {
-            ...?user.userMetadata,
-            'platform_invitation_accepted': true,
-          },
+          data: {...?user.userMetadata, 'platform_invitation_accepted': true},
         ),
       );
     }
@@ -160,8 +159,7 @@ class WorkspaceOptions {
   final List<Map<String, dynamic>> tenantMemberships;
   final Map<String, dynamic>? platformMembership;
 
-  bool get isEmpty =>
-      tenantMemberships.isEmpty && platformMembership == null;
+  bool get isEmpty => tenantMemberships.isEmpty && platformMembership == null;
   bool get hasMultiple =>
       platformMembership != null || tenantMemberships.length > 1;
 }
@@ -196,7 +194,9 @@ class WorkspaceSelector extends StatelessWidget {
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 8),
-              const Text('Elige si deseas administrar la plataforma o una empresa.'),
+              const Text(
+                'Elige si deseas administrar la plataforma o una empresa.',
+              ),
               const SizedBox(height: 24),
               if (workspaces.platformMembership != null)
                 _WorkspaceCard(
@@ -214,16 +214,16 @@ class WorkspaceSelector extends StatelessWidget {
                 ),
               ...workspaces.tenantMemberships.map(
                 (membership) => _WorkspaceCard(
-                  title: (membership['tenants'] as Map<String, dynamic>)['name']
-                      as String,
+                  title:
+                      (membership['tenants'] as Map<String, dynamic>)['name']
+                          as String,
                   subtitle:
                       'Identificador: ${(membership['tenants'] as Map<String, dynamic>)['slug']} · Rol: ${membership['role']}',
                   icon: Icons.business,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => TenantWorkspacePage(
-                        membership: membership,
-                      ),
+                      builder: (_) =>
+                          TenantWorkspacePage(membership: membership),
                     ),
                   ),
                 ),
@@ -294,8 +294,10 @@ class _PlatformWorkspacePageState extends State<PlatformWorkspacePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Administración de plataforma',
-                    style: Theme.of(context).textTheme.headlineMedium),
+                Text(
+                  'Administración de plataforma',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
                 const SizedBox(height: 8),
                 Text('Rol: ${widget.role}'),
                 const SizedBox(height: 24),
@@ -378,8 +380,10 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   Future<void> _loadData() async {
     try {
       final client = Supabase.instance.client;
-      final tenants =
-          await client.from('tenants').select('id, name, slug').order('name');
+      final tenants = await client
+          .from('tenants')
+          .select('id, name, slug')
+          .order('name');
       final accessUsers =
           await client.rpc('list_platform_access') as List<dynamic>;
       if (!mounted) return;
@@ -389,10 +393,10 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
         for (final item in accessUsers) {
           final row = Map<String, dynamic>.from(item as Map);
           final userId = row['user_id'] as String;
-          final user = grouped.putIfAbsent(userId, () => {
-                ...row,
-                'tenant_access': <Map<String, dynamic>>[],
-              });
+          final user = grouped.putIfAbsent(
+            userId,
+            () => {...row, 'tenant_access': <Map<String, dynamic>>[]},
+          );
           final tenantId = row['tenant_id'] as String?;
           if (tenantId != null) {
             (user['tenant_access'] as List<Map<String, dynamic>>).add({
@@ -477,14 +481,17 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
         'manage-platform-user',
         body: {'user_id': userId, 'action': action},
       );
-      if (response.data is Map &&
-          (response.data as Map)['ok'] != true) {
-        throw Exception((response.data as Map)['error'] ?? 'La operación falló.');
+      if (response.data is Map && (response.data as Map)['ok'] != true) {
+        throw Exception(
+          (response.data as Map)['error'] ?? 'La operación falló.',
+        );
       }
       if (mounted) {
-        setState(() => _message = action == 'reset_password'
-            ? 'Enlace de restablecimiento enviado.'
-            : 'Acción ejecutada correctamente.');
+        setState(
+          () => _message = action == 'reset_password'
+              ? 'Enlace de restablecimiento enviado.'
+              : 'Acción ejecutada correctamente.',
+        );
         await _loadData();
       }
       return true;
@@ -570,8 +577,10 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
           children: [
             Row(
               children: [
-                Text('Usuarios activos',
-                    style: Theme.of(context).textTheme.headlineMedium),
+                Text(
+                  'Usuarios activos',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
                 const Spacer(),
                 FilledButton.icon(
                   onPressed: () => _openUserPanel(),
@@ -581,7 +590,9 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
               ],
             ),
             const SizedBox(height: 8),
-            const Text('Selecciona un usuario para administrar su cuenta y permisos.'),
+            const Text(
+              'Selecciona un usuario para administrar su cuenta y permisos.',
+            ),
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(_error!, style: TextStyle(color: Colors.red)),
@@ -595,7 +606,9 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
               child: Card(
                 clipBehavior: Clip.antiAlias,
                 child: _accessUsers.isEmpty
-                    ? const Center(child: Text('No hay usuarios con accesos asignados.'))
+                    ? const Center(
+                        child: Text('No hay usuarios con accesos asignados.'),
+                      )
                     : SingleChildScrollView(
                         child: DataTable(
                           columns: const [
@@ -611,44 +624,69 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                             return DataRow(
                               onSelectChanged: (_) => _openUserPanel(user),
                               cells: [
-                                DataCell(Checkbox(
-                                  value: _selectedUserIds.contains(id),
-                                  onChanged: (value) => _selectUser(user, value),
-                                )),
+                                DataCell(
+                                  Checkbox(
+                                    value: _selectedUserIds.contains(id),
+                                    onChanged: (value) =>
+                                        _selectUser(user, value),
+                                  ),
+                                ),
                                 DataCell(Text(id.substring(0, 8))),
                                 DataCell(Text(user['email'] as String? ?? '')),
-                                DataCell(Text(
-                                    user['platform_role'] as String? ?? 'Tenant')),
-                                DataCell(Text(
-                                  ((user['tenant_access'] as List<dynamic>?)
-                                              ?.map((item) =>
-                                                  (item as Map)['tenant_name'])
+                                DataCell(
+                                  Text(
+                                    user['platform_role'] as String? ??
+                                        'Tenant',
+                                  ),
+                                ),
+                                DataCell(
+                                  Text(
+                                    ((user['tenant_access'] as List<dynamic>?)
+                                                    ?.map(
+                                                      (item) =>
+                                                          (item
+                                                              as Map)['tenant_name'],
+                                                    )
+                                                    .whereType<String>()
+                                                    .join(', '))
+                                                ?.isNotEmpty ==
+                                            true
+                                        ? (user['tenant_access']
+                                                  as List<dynamic>)
+                                              .map(
+                                                (item) =>
+                                                    (item
+                                                        as Map)['tenant_name'],
+                                              )
                                               .whereType<String>()
-                                              .join(', '))
-                                          ?.isNotEmpty ==
-                                      true
-                                      ? (user['tenant_access'] as List<dynamic>)
-                                          .map((item) =>
-                                              (item as Map)['tenant_name'])
-                                          .whereType<String>()
-                                          .join(', ')
-                                      : 'Sin tenant',
-                                )),
-                                DataCell(Text(
-                                  ((user['tenant_access'] as List<dynamic>?)
-                                              ?.map((item) =>
-                                                  (item as Map)['tenant_role'])
+                                              .join(', ')
+                                        : 'Sin tenant',
+                                  ),
+                                ),
+                                DataCell(
+                                  Text(
+                                    ((user['tenant_access'] as List<dynamic>?)
+                                                    ?.map(
+                                                      (item) =>
+                                                          (item
+                                                              as Map)['tenant_role'],
+                                                    )
+                                                    .whereType<String>()
+                                                    .join(', '))
+                                                ?.isNotEmpty ==
+                                            true
+                                        ? (user['tenant_access']
+                                                  as List<dynamic>)
+                                              .map(
+                                                (item) =>
+                                                    (item
+                                                        as Map)['tenant_role'],
+                                              )
                                               .whereType<String>()
-                                              .join(', '))
-                                          ?.isNotEmpty ==
-                                      true
-                                      ? (user['tenant_access'] as List<dynamic>)
-                                          .map((item) =>
-                                              (item as Map)['tenant_role'])
-                                          .whereType<String>()
-                                          .join(', ')
-                                      : 'Sin rol',
-                                )),
+                                              .join(', ')
+                                        : 'Sin rol',
+                                  ),
+                                ),
                               ],
                             );
                           }).toList(),
@@ -691,16 +729,15 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
       ),
       transitionBuilder: (context, animation, secondaryAnimation, child) =>
           SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1, 0),
-          end: Offset.zero,
-        ).animate(animation),
-        child: child,
-      ),
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
       transitionDuration: const Duration(milliseconds: 220),
     );
   }
-
 }
 
 class _UserSidePanel extends StatefulWidget {
@@ -718,18 +755,17 @@ class _UserSidePanel extends StatefulWidget {
     required String userId,
     required String? platformRole,
     required List<Map<String, String>> tenantAccess,
-  }) onSavePermissions;
+  })
+  onSavePermissions;
   final Future<void> Function(
     String email,
     String? platformRole,
     String? tenantId,
     String tenantRole,
-  ) onInvite;
-  final Future<bool> Function(
-    String action,
-    String title,
-    String message,
-  ) onAction;
+  )
+  onInvite;
+  final Future<bool> Function(String action, String title, String message)
+  onAction;
 
   @override
   State<_UserSidePanel> createState() => _UserSidePanelState();
@@ -781,9 +817,8 @@ class _UserSidePanelState extends State<_UserSidePanel> {
                   _isNew
                       ? 'Añadir usuario'
                       : user?['email'] as String? ?? 'Usuario',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                  style: Theme.of(context).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
               if (!_isNew) ...[
@@ -804,7 +839,9 @@ class _UserSidePanelState extends State<_UserSidePanel> {
                       ),
                       _PanelAction(
                         icon: _disabled ? Icons.check_circle : Icons.block,
-                        label: _disabled ? 'Activar usuario' : 'Deshabilitar usuario',
+                        label: _disabled
+                            ? 'Activar usuario'
+                            : 'Deshabilitar usuario',
                         onTap: () async {
                           final action = _disabled ? 'enable' : 'disable';
                           final completed = await widget.onAction(
@@ -867,8 +904,10 @@ class _UserSidePanelState extends State<_UserSidePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Información del usuario',
-            style: Theme.of(context).textTheme.titleLarge),
+        Text(
+          'Información del usuario',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 18),
         TextField(
           controller: _emailController,
@@ -917,13 +956,13 @@ class _PanelAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => TextButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 20),
-        label: Text(label),
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        ),
-      );
+    onPressed: onTap,
+    icon: Icon(icon, size: 20),
+    label: Text(label),
+    style: TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+    ),
+  );
 }
 
 class _InfoLine extends StatelessWidget {
@@ -934,16 +973,16 @@ class _InfoLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 4),
-            Text(value),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 4),
+        Text(value),
+      ],
+    ),
+  );
 }
 
 class _PanelTab extends StatelessWidget {
@@ -959,24 +998,24 @@ class _PanelTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Expanded(
-        child: InkWell(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: selected
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.transparent,
-                  width: 2,
-                ),
-              ),
+    child: InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
+              width: 2,
             ),
-            child: Text(label, textAlign: TextAlign.center),
           ),
         ),
-      );
+        child: Text(label, textAlign: TextAlign.center),
+      ),
+    ),
+  );
 }
 
 class _AccessUserCard extends StatefulWidget {
@@ -994,13 +1033,15 @@ class _AccessUserCard extends StatefulWidget {
     required String userId,
     required String? platformRole,
     required List<Map<String, String>> tenantAccess,
-  }) onSave;
+  })
+  onSave;
   final Future<void> Function(
     String email,
     String? platformRole,
     String? tenantId,
     String tenantRole,
-  ) onInvite;
+  )
+  onInvite;
   final bool isNew;
 
   @override
@@ -1134,7 +1175,9 @@ class _AccessUserCardState extends State<_AccessUserCard> {
                           await widget.onInvite(
                             _newEmailController.text.trim().toLowerCase(),
                             _platformRole,
-                            _tenantRoles.isEmpty ? null : _tenantRoles.keys.first,
+                            _tenantRoles.isEmpty
+                                ? null
+                                : _tenantRoles.keys.first,
                             _tenantRoles.isEmpty
                                 ? 'supervisor'
                                 : _tenantRoles.values.first,
@@ -1144,10 +1187,12 @@ class _AccessUserCardState extends State<_AccessUserCard> {
                             userId: widget.access['user_id'] as String,
                             platformRole: _platformRole,
                             tenantAccess: _tenantRoles.entries
-                                .map((entry) => {
-                                      'tenant_id': entry.key,
-                                      'tenant_role': entry.value,
-                                    })
+                                .map(
+                                  (entry) => {
+                                    'tenant_id': entry.key,
+                                    'tenant_role': entry.value,
+                                  },
+                                )
                                 .toList(),
                           );
                         }
@@ -1187,9 +1232,12 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
   Future<void> _save() async {
     final password = _passwordController.text;
     if (password.length < 8) {
-      setState(() => _error = 'La contraseña debe tener al menos 8 caracteres.');
+      setState(
+        () => _error = 'La contraseña debe tener al menos 8 caracteres.',
+      );
       return;
     }
+
     if (password != _confirmationController.text) {
       setState(() => _error = 'Las contraseñas no coinciden.');
       return;
@@ -1203,10 +1251,7 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(
           password: password,
-          data: {
-            ...?user.userMetadata,
-            'must_set_password': false,
-          },
+          data: {...?user.userMetadata, 'must_set_password': false},
         ),
       );
       if (!mounted) return;
@@ -1216,7 +1261,11 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
     } on AuthException catch (error) {
       if (mounted) setState(() => _error = error.message);
     } catch (error) {
-      if (mounted) setState(() => _error = 'No fue posible guardar la contraseña.\n$error');
+      if (mounted) {
+        setState(
+          () => _error = 'No fue posible guardar la contraseña.\n$error',
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1244,22 +1293,21 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
                       )
                       .maybeSingle()
                       .then(
-                        (row) => row == null
-                            ? null
-                            : Map<String, dynamic>.from(row),
+                        (row) =>
+                            row == null ? null : Map<String, dynamic>.from(row),
                       ),
                   builder: (context, snapshot) {
                     final email =
                         Supabase.instance.client.auth.currentUser?.email ?? '';
-                    final name = snapshot.data?['full_name'] as String? ??
+                    final name =
+                        snapshot.data?['full_name'] as String? ??
                         email.split('@').first;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 4),
                       child: Text(
                         'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     );
                   },
@@ -1387,14 +1435,16 @@ class _AuthPageState extends State<AuthPage> {
                     'ITONE',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  Text(title,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 32),
                   TextFormField(
                     controller: _emailController,
@@ -1423,29 +1473,32 @@ class _AuthPageState extends State<AuthPage> {
                   if (_error != null)
                     Text(_error!, style: TextStyle(color: Colors.red[700])),
                   if (_message != null)
-                    Text(_message!,
-                        style: TextStyle(color: Colors.green[700])),
+                    Text(_message!, style: TextStyle(color: Colors.green[700])),
                   if (_error != null || _message != null)
                     const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _loading ? null : _submit,
-                    child: Text(_loading
-                        ? 'Procesando...'
-                        : _isRegistration
-                            ? 'Crear cuenta'
-                            : 'Iniciar sesión'),
+                    child: Text(
+                      _loading
+                          ? 'Procesando...'
+                          : _isRegistration
+                          ? 'Crear cuenta'
+                          : 'Iniciar sesión',
+                    ),
                   ),
                   TextButton(
                     onPressed: _loading
                         ? null
                         : () => setState(() {
-                              _isRegistration = !_isRegistration;
-                              _error = null;
-                              _message = null;
-                            }),
-                    child: Text(_isRegistration
-                        ? 'Ya tengo una cuenta'
-                        : 'Crear una cuenta empresarial'),
+                            _isRegistration = !_isRegistration;
+                            _error = null;
+                            _message = null;
+                          }),
+                    child: Text(
+                      _isRegistration
+                          ? 'Ya tengo una cuenta'
+                          : 'Crear una cuenta empresarial',
+                    ),
                   ),
                 ],
               ),
@@ -1490,8 +1543,9 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
     final name = _nameController.text.trim();
     final slug = _slugController.text.trim().toLowerCase();
     if (name.isEmpty || !RegExp(r'^[a-z0-9-]{3,40}$').hasMatch(slug)) {
-      setState(() => _error =
-          'Indica el nombre y un identificador de 3 a 40 caracteres (a-z, 0-9 o -).');
+      setState(
+        () => _error = 'Indica el nombre y un identificador de 3 a 40 caracteres (a-z, 0-9 o -).',
+      );
       return;
     }
     setState(() {
@@ -1509,10 +1563,7 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => TenantWorkspacePage(
-              membership: {
-                'tenant_id': tenantId,
-                'role': 'tenant_admin',
-              },
+              membership: {'tenant_id': tenantId, 'role': 'tenant_admin'},
             ),
           ),
         );
@@ -1524,7 +1575,6 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-
   }
 
   @override
@@ -1548,8 +1598,10 @@ class _TenantOnboardingPageState extends State<TenantOnboardingPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Configura tu empresa',
-                    style: Theme.of(context).textTheme.headlineMedium),
+                Text(
+                  'Configura tu empresa',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
                 const SizedBox(height: 12),
                 const Text(
                   'Este será el espacio aislado donde gestionarás usuarios y operaciones.',
@@ -1596,7 +1648,9 @@ class TenantWorkspacePage extends StatelessWidget {
   Future<Map<String, dynamic>> _tenant() async {
     return await Supabase.instance.client
         .from('tenants')
-        .select('id, name, slug, sector, logo_url, created_at')
+        .select(
+          'id, name, slug, sector, logo_url, language, timezone, created_at',
+        )
         .eq('id', membership['tenant_id'])
         .single();
   }
@@ -1618,10 +1672,7 @@ class TenantWorkspacePage extends StatelessWidget {
         }
         final tenant = snapshot.data!;
         return TenantOperationsShell(
-          initialMembership: {
-            ...membership,
-            'tenants': tenant,
-          },
+          initialMembership: {...membership, 'tenants': tenant},
         );
       },
     );
@@ -1642,7 +1693,8 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   int _selectedIndex = 0;
   bool _sidebarCollapsed = false;
   String _presence = 'available';
-  late final Future<List<Map<String, dynamic>>> _memberships = _loadMemberships();
+  late final Future<List<Map<String, dynamic>>> _memberships =
+      _loadMemberships();
   late final Future<Map<String, dynamic>?> _profile = _loadProfile();
 
   Future<Map<String, dynamic>?> _loadProfile() async {
@@ -1659,10 +1711,13 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   Future<List<Map<String, dynamic>>> _loadMemberships() async {
     final rows = await Supabase.instance.client
         .from('tenant_memberships')
-        .select('tenant_id, role, tenants(id, name, slug, sector, logo_url)')
+        .select(
+          'tenant_id, role, tenants(id, name, slug, sector, logo_url, language, timezone)',
+        )
         .eq('user_id', Supabase.instance.client.auth.currentUser!.id);
-    final memberships =
-        List<Map<String, dynamic>>.from(rows.map((row) => Map<String, dynamic>.from(row)));
+    final memberships = List<Map<String, dynamic>>.from(
+      rows.map((row) => Map<String, dynamic>.from(row)),
+    );
     if (memberships.isEmpty) return [widget.initialMembership];
     return memberships;
   }
@@ -1670,18 +1725,21 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   String get _role => _activeMembership['role'] as String? ?? 'operator';
 
   List<_TenantModule> get _modules => [
-        const _TenantModule('Dashboard', Icons.dashboard_outlined),
-        const _TenantModule('Clientes', Icons.people_outline),
-        const _TenantModule('WhatsApp Business', Icons.chat_outlined),
-        const _TenantModule('Tickets', Icons.confirmation_number_outlined),
-        const _TenantModule('Agenda', Icons.calendar_month_outlined),
-        if (_role != 'operator')
-          const _TenantModule('Reportes', Icons.bar_chart_outlined),
-        if (_role == 'tenant_admin')
-          const _TenantModule('Usuarios y permisos', Icons.manage_accounts_outlined),
-        if (_role == 'tenant_admin')
-          const _TenantModule('Configuración', Icons.settings_outlined),
-      ];
+    const _TenantModule('Dashboard', Icons.dashboard_outlined),
+    const _TenantModule('Clientes', Icons.people_outline),
+    const _TenantModule('WhatsApp Business', Icons.chat_outlined),
+    const _TenantModule('Tickets', Icons.confirmation_number_outlined),
+    const _TenantModule('Agenda', Icons.calendar_month_outlined),
+    if (_role != 'operator')
+      const _TenantModule('Reportes', Icons.bar_chart_outlined),
+    if (_role == 'tenant_admin')
+      const _TenantModule(
+        'Usuarios y permisos',
+        Icons.manage_accounts_outlined,
+      ),
+    if (_role == 'tenant_admin')
+      const _TenantModule('Configuración', Icons.settings_outlined),
+  ];
 
   void _changeTenant(Map<String, dynamic> membership) {
     setState(() {
@@ -1717,7 +1775,8 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
               builder: (context, snapshot) {
                 final email =
                     Supabase.instance.client.auth.currentUser?.email ?? '';
-                final name = snapshot.data?['full_name'] as String? ??
+                final name =
+                    snapshot.data?['full_name'] as String? ??
                     email.split('@').first;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1725,15 +1784,13 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
                   children: [
                     Text(
                       'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     Text(
                       tenant['name'] as String,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.black54,
-                          ),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: Colors.black54),
                     ),
                   ],
                 );
@@ -1843,19 +1900,13 @@ class _TenantSidebar extends StatelessWidget {
           Padding(
             padding: EdgeInsets.fromLTRB(collapsed ? 12 : 20, 20, 12, 18),
             child: collapsed
-                ? Column(
-                    children: [
-                      _TenantBrand(
-                        tenant: tenant,
-                        centered: true,
-                        height: 42,
-                      ),
-                      IconButton(
-                        tooltip: 'Expandir menú',
-                        onPressed: onToggle,
-                        icon: const Icon(Icons.menu),
-                      ),
-                    ],
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      tooltip: 'Expandir menú',
+                      onPressed: onToggle,
+                      icon: const Icon(Icons.menu),
+                    ),
                   )
                 : Row(
                     children: [
@@ -1898,14 +1949,13 @@ class _TenantSidebar extends StatelessWidget {
             child: collapsed
                 ? const SizedBox.shrink()
                 : Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '${_roleLabel(role)} · ${tenant['slug']}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.black45,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${_roleLabel(role)} · ${tenant['slug']}',
+                      style: Theme.of(context).textTheme.labelSmall
+                          ?.copyWith(color: Colors.black45),
                     ),
-              ),
-            ),
+                  ),
           ),
         ],
       ),
@@ -1925,10 +1975,10 @@ class _SidebarLabel extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              letterSpacing: 1.1,
-              color: Colors.black45,
-              fontWeight: FontWeight.bold,
-            ),
+          letterSpacing: 1.1,
+          color: Colors.black45,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -2021,9 +2071,8 @@ class _TenantModuleContent extends StatelessWidget {
               children: [
                 Text(
                   module.label,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                  style: Theme.of(context).textTheme.headlineMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -2080,24 +2129,24 @@ class _TenantModuleContent extends StatelessWidget {
                     !isWhatsApp &&
                     module.label != 'Configuración')
                   Card(
-                  child: ListTile(
-                    leading: Icon(module.icon),
-                    title: Text(
-                      isDashboard
-                          ? 'Bienvenido al centro de operaciones'
-                          : isWhatsApp
-                              ? 'Bandeja de WhatsApp Business'
-                          : 'Este módulo estará disponible próximamente',
-                    ),
-                    subtitle: Text(
-                      isDashboard
-                          ? 'Rol actual: ${_roleLabel(role)}. Usa el menú lateral para navegar.'
-                          : isWhatsApp
-                              ? 'Administra tus conversaciones y contactos desde un solo lugar.'
-                          : 'La estructura de permisos ya está preparada para este módulo.',
+                    child: ListTile(
+                      leading: Icon(module.icon),
+                      title: Text(
+                        isDashboard
+                            ? 'Bienvenido al centro de operaciones'
+                            : isWhatsApp
+                            ? 'Bandeja de WhatsApp Business'
+                            : 'Este módulo estará disponible próximamente',
+                      ),
+                      subtitle: Text(
+                        isDashboard
+                            ? 'Rol actual: ${_roleLabel(role)}. Usa el menú lateral para navegar.'
+                            : isWhatsApp
+                            ? 'Administra tus conversaciones y contactos desde un solo lugar.'
+                            : 'La estructura de permisos ya está preparada para este módulo.',
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -2154,7 +2203,10 @@ class _UserPresenceMenu extends StatelessWidget {
       itemBuilder: (context) => [
         PopupMenuItem(
           enabled: false,
-          child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: Text(
+            name,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         ),
         const PopupMenuDivider(),
         ..._presenceLabels.entries.map(
@@ -2171,10 +2223,7 @@ class _UserPresenceMenu extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: 'logout',
-          child: Text('Cerrar sesión'),
-        ),
+        const PopupMenuItem(value: 'logout', child: Text('Cerrar sesión')),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -2183,8 +2232,9 @@ class _UserPresenceMenu extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundImage:
-                  avatarUrl == null ? null : NetworkImage(avatarUrl),
+              backgroundImage: avatarUrl == null
+                  ? null
+                  : NetworkImage(avatarUrl),
               child: avatarUrl == null
                   ? Text(name.substring(0, 1).toUpperCase())
                   : null,
@@ -2247,8 +2297,8 @@ class _IpsDashboard extends StatelessWidget {
             final width = constraints.maxWidth > 1100
                 ? (constraints.maxWidth - 80) / 5
                 : constraints.maxWidth > 700
-                    ? (constraints.maxWidth - 16) / 2
-                    : constraints.maxWidth;
+                ? (constraints.maxWidth - 16) / 2
+                : constraints.maxWidth;
             return Wrap(
               spacing: 16,
               runSpacing: 16,
@@ -2407,9 +2457,8 @@ class _IpsMetricCard extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 value,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
               Text(
@@ -2445,14 +2494,9 @@ const _tenantSectors = <String, String>{
 };
 
 class _TenantBrand extends StatelessWidget {
-  const _TenantBrand({
-    required this.tenant,
-    this.centered = false,
-    this.height = 30,
-  });
+  const _TenantBrand({required this.tenant, this.height = 30});
 
   final Map<String, dynamic> tenant;
-  final bool centered;
   final double height;
 
   @override
@@ -2466,7 +2510,7 @@ class _TenantBrand extends StatelessWidget {
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => Text(tenant['name'] as String),
           );
-    return centered ? Center(child: brand) : brand;
+    return brand;
   }
 }
 
@@ -2495,6 +2539,10 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   bool _uploadingLogo = false;
   String? _avatarUrl;
   String? _message;
+  late String _language = widget.tenant['language'] as String? ?? 'es';
+  late String _timezone =
+      widget.tenant['timezone'] as String? ?? 'America/Bogota';
+  int _settingsTab = 0;
 
   @override
   void initState() {
@@ -2550,13 +2598,16 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
     try {
       final bytes = await file.readAsBytes();
       final path = '${user.id}/avatar.${file.name.split('.').last}';
-      await Supabase.instance.client.storage.from('user-avatars').uploadBinary(
+      await Supabase.instance.client.storage
+          .from('user-avatars')
+          .uploadBinary(
             path,
             bytes,
             fileOptions: const FileOptions(upsert: true),
           );
-      final url =
-          Supabase.instance.client.storage.from('user-avatars').getPublicUrl(path);
+      final url = Supabase.instance.client.storage
+          .from('user-avatars')
+          .getPublicUrl(path);
       await Supabase.instance.client.from('user_profiles').upsert({
         'user_id': user.id,
         'avatar_url': url,
@@ -2572,13 +2623,14 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
       if (mounted) {
         setState(() => _message = 'Error de almacenamiento: ${error.message}');
       }
-
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
       if (mounted) {
-        setState(() => _message =
-            'No fue posible subir la foto. Revisa el bucket user-avatars.');
+        setState(
+          () => _message =
+              'No fue posible subir la foto. Revisa el bucket user-avatars.',
+        );
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -2594,7 +2646,9 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
       final bytes = await file.readAsBytes();
       final extension = file.name.split('.').last.toLowerCase();
       final path = '$tenantId/logo.$extension';
-      await Supabase.instance.client.storage.from('tenant-logos').uploadBinary(
+      await Supabase.instance.client.storage
+          .from('tenant-logos')
+          .uploadBinary(
             path,
             bytes,
             fileOptions: const FileOptions(upsert: true),
@@ -2606,10 +2660,14 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
           .from('tenants')
           .update({'logo_url': url})
           .eq('id', tenantId);
-      widget.onLogoSaved('$url?updated=${DateTime.now().millisecondsSinceEpoch}');
+      widget.onLogoSaved(
+        '$url?updated=${DateTime.now().millisecondsSinceEpoch}',
+      );
       if (mounted) setState(() => _message = 'Logo actualizado.');
     } on StorageException catch (error) {
-      if (mounted) setState(() => _message = 'Error de almacenamiento: ${error.message}');
+      if (mounted) {
+        setState(() => _message = 'Error de almacenamiento: ${error.message}');
+      }
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
@@ -2634,7 +2692,31 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
-      if (mounted) setState(() => _message = 'No fue posible guardar el sector.');
+      if (mounted) {
+        setState(() => _message = 'No fue posible guardar el sector.');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveRegional() async {
+    setState(() {
+      _saving = true;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client
+          .from('tenants')
+          .update({'language': _language, 'timezone': _timezone})
+          .eq('id', widget.tenant['id']);
+      widget.tenant['language'] = _language;
+      widget.tenant['timezone'] = _timezone;
+      if (mounted) {
+        setState(() => _message = 'Preferencias regionales guardadas.');
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -2644,76 +2726,593 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   Widget build(BuildContext context) {
     return Card(
       child: SizedBox(
-          height: 430,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                width: 220,
-                child: Material(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    children: [
-                      ListTile(
-                        selected: true,
-                        leading: const Icon(Icons.tune),
-                        title: const Text('General'),
-                        subtitle: const Text('Cuenta y empresa'),
-                        onTap: () {},
+        height: 500,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 220,
+              child: Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  children: [
+                    for (final item in const [
+                      ('General', 'Cuenta y empresa', Icons.tune),
+                      ('Regional', 'Idioma y zona horaria', Icons.public),
+                      (
+                        'Integraciones',
+                        'Conexiones externas',
+                        Icons.hub_outlined,
                       ),
-                    ],
-                  ),
+                      (
+                        'WhatsApp',
+                        'Bienvenida y automatizaciones',
+                        Icons.chat_outlined,
+                      ),
+                    ])
+                      ListTile(
+                        selected:
+                            _settingsTab ==
+                            const [
+                              ('General', 'Cuenta y empresa', Icons.tune),
+                              (
+                                'Regional',
+                                'Idioma y zona horaria',
+                                Icons.public,
+                              ),
+                              (
+                                'Integraciones',
+                                'Conexiones externas',
+                                Icons.hub_outlined,
+                              ),
+                              (
+                                'WhatsApp',
+                                'Bienvenida y automatizaciones',
+                                Icons.chat_outlined,
+                              ),
+                            ].indexOf(item),
+                        leading: Icon(item.$3),
+                        title: Text(item.$1),
+                        subtitle: Text(item.$2),
+                        onTap: () => setState(
+                          () => _settingsTab = const [
+                            ('General', 'Cuenta y empresa', Icons.tune),
+                            ('Regional', 'Idioma y zona horaria', Icons.public),
+                            (
+                              'Integraciones',
+                              'Conexiones externas',
+                              Icons.hub_outlined,
+                            ),
+                            (
+                              'WhatsApp',
+                              'Bienvenida y automatizaciones',
+                              Icons.chat_outlined,
+                            ),
+                          ].indexOf(item),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: DefaultTabController(
-                  length: 2,
-                  child: Column(
-                    children: [
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: DefaultTabController(
+                length: 2,
+                child: Column(
+                  children: [
+                    if (_settingsTab == 0)
                       const TabBar(
                         tabs: [
                           Tab(text: 'Información personal'),
                           Tab(text: 'Información de la empresa'),
                         ],
                       ),
-                      Expanded(
-                        child: TabBarView(
-                          children: [
-                            _PersonalSettings(
-                              nameController: _nameController,
-                              avatarUrl: _avatarUrl,
+                    Expanded(
+                      child: _settingsTab == 0
+                          ? TabBarView(
+                              children: [
+                                _PersonalSettings(
+                                  nameController: _nameController,
+                                  avatarUrl: _avatarUrl,
+                                  saving: _saving,
+                                  uploading: _uploading,
+                                  message: _message,
+                                  onSave: _saveProfile,
+                                  onPickAvatar: _pickAvatar,
+                                ),
+                                _CompanySettings(
+                                  tenant: widget.tenant,
+                                  sector: _sector,
+                                  saving: _saving,
+                                  uploadingLogo: _uploadingLogo,
+                                  message: _message,
+                                  onSectorChanged: (value) =>
+                                      setState(() => _sector = value),
+                                  onSave: _save,
+                                  onPickLogo: _pickLogo,
+                                ),
+                              ],
+                            )
+                          : _settingsTab == 1
+                          ? _RegionalSettings(
+                              language: _language,
+                              timezone: _timezone,
                               saving: _saving,
-                              uploading: _uploading,
                               message: _message,
-                              onSave: _saveProfile,
-                              onPickAvatar: _pickAvatar,
+                              onLanguageChanged: (value) =>
+                                  setState(() => _language = value),
+                              onTimezoneChanged: (value) =>
+                                  setState(() => _timezone = value),
+                              onSave: _saveRegional,
+                            )
+                          : _settingsTab == 2
+                          ? const _IntegrationsSettings()
+                          : _WhatsAppSettings(
+                              tenantId: widget.tenant['id'] as String,
                             ),
-                            _CompanySettings(
-                              tenant: widget.tenant,
-                              sector: _sector,
-                              saving: _saving,
-                              uploadingLogo: _uploadingLogo,
-                              message: _message,
-                              onSectorChanged: (value) =>
-                                  setState(() => _sector = value),
-                              onSave: _save,
-                              onPickLogo: _pickLogo,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
 
+class _RegionalSettings extends StatelessWidget {
+  const _RegionalSettings({
+    required this.language,
+    required this.timezone,
+    required this.saving,
+    required this.message,
+    required this.onLanguageChanged,
+    required this.onTimezoneChanged,
+    required this.onSave,
+  });
+
+  final String language;
+  final String timezone;
+  final bool saving;
+  final String? message;
+  final ValueChanged<String> onLanguageChanged;
+  final ValueChanged<String> onTimezoneChanged;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(
+          'Preferencias regionales',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        const Text('Configura el idioma y la zona horaria de tu empresa.'),
+        const SizedBox(height: 24),
+        DropdownButtonFormField<String>(
+          initialValue: language,
+          decoration: const InputDecoration(
+            labelText: 'Idioma',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'es', child: Text('Español')),
+            DropdownMenuItem(value: 'en', child: Text('English')),
+          ],
+          onChanged: saving
+              ? null
+              : (value) {
+                  if (value != null) onLanguageChanged(value);
+                },
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<String>(
+          initialValue: timezone,
+          decoration: const InputDecoration(
+            labelText: 'Zona horaria',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(
+              value: 'America/Bogota',
+              child: Text('Bogotá (GMT-5)'),
+            ),
+            DropdownMenuItem(
+              value: 'America/Mexico_City',
+              child: Text('Ciudad de México (GMT-6)'),
+            ),
+            DropdownMenuItem(
+              value: 'America/New_York',
+              child: Text('Nueva York (GMT-5/-4)'),
+            ),
+            DropdownMenuItem(
+              value: 'Europe/Madrid',
+              child: Text('Madrid (GMT+1/+2)'),
+            ),
+          ],
+          onChanged: saving
+              ? null
+              : (value) {
+                  if (value != null) onTimezoneChanged(value);
+                },
+        ),
+        const SizedBox(height: 18),
+        FilledButton.icon(
+          onPressed: saving ? null : onSave,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(saving ? 'Guardando...' : 'Guardar preferencias'),
+        ),
+        if (message != null) ...[const SizedBox(height: 12), Text(message!)],
+      ],
+    );
+  }
+}
+
+class _IntegrationsSettings extends StatelessWidget {
+  const _IntegrationsSettings();
+
+  @override
+  Widget build(BuildContext context) {
+    final integrations = [
+      (
+        'WhatsApp Business',
+        'Mensajería y atención por WhatsApp Cloud API.',
+        Icons.chat_outlined,
+      ),
+      (
+        'Microsoft 365',
+        'Calendarios, usuarios y servicios de Microsoft.',
+        Icons.business_center_outlined,
+      ),
+      (
+        'Google Workspace',
+        'Calendario, contactos y servicios de Google.',
+        Icons.public,
+      ),
+      (
+        'API privada',
+        'Conecta una plataforma propia mediante API y webhooks.',
+        Icons.api_outlined,
+      ),
+    ];
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text('Integraciones', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        const Text(
+          'Conecta servicios externos de forma independiente para este tenant.',
+        ),
+        const SizedBox(height: 20),
+        ...integrations.map(
+          (integration) => Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              leading: Icon(integration.$3),
+              title: Text(integration.$1),
+              subtitle: Text(integration.$2),
+              trailing: const Chip(label: Text('No configurada')),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WhatsAppSettings extends StatelessWidget {
+  const _WhatsAppSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 5,
+      child: Column(
+        children: [
+          Material(
+            color: Theme.of(context).colorScheme.surface,
+            child: const TabBar(
+              isScrollable: true,
+              tabs: [
+                Tab(text: 'Integración'),
+                Tab(text: 'Bienvenida'),
+                Tab(text: 'Flujo de mensajes'),
+                Tab(text: 'SLA'),
+                Tab(text: 'Automatizaciones'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _WhatsAppIntegrationPanel(tenantId: tenantId),
+                _WhatsAppSettingPanel(
+                  icon: Icons.waving_hand_outlined,
+                  title: 'Mensaje de bienvenida',
+                  description: 'Define el mensaje inicial, el horario de atención y las opciones que verá el contacto al iniciar una conversación.',
+                  actionLabel: 'Crear mensaje de bienvenida',
+                ),
+                _WhatsAppSettingPanel(
+                  icon: Icons.account_tree_outlined,
+                  title: 'Flujo de mensajes',
+                  description: 'Diseña el recorrido de atención: menú inicial, respuestas, derivación a un agente y cierre de la conversación.',
+                  actionLabel: 'Crear flujo',
+                ),
+                _WhatsAppSettingPanel(
+                  icon: Icons.timer_outlined,
+                  title: 'Acuerdos de nivel de servicio',
+                  description: 'Configura tiempos objetivo de primera respuesta, atención y escalamiento según la prioridad del contacto.',
+                  actionLabel: 'Configurar SLA',
+                ),
+                _WhatsAppSettingPanel(
+                  icon: Icons.auto_awesome_outlined,
+                  title: 'Automatizaciones',
+                  description: 'Administra reglas para responder, etiquetar, asignar o notificar cuando ocurra un evento en WhatsApp.',
+                  actionLabel: 'Crear automatización',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WhatsAppIntegrationPanel extends StatefulWidget {
+  const _WhatsAppIntegrationPanel({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_WhatsAppIntegrationPanel> createState() =>
+      _WhatsAppIntegrationPanelState();
+}
+
+class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
+  final _businessIdController = TextEditingController();
+  final _phoneIdController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+  bool _loading = true;
+  bool _saving = false;
+  String _status = 'not_configured';
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _businessIdController.dispose();
+    _phoneIdController.dispose();
+    _phoneController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_integrations')
+          .select('status, metadata')
+          .eq('tenant_id', widget.tenantId)
+          .eq('provider', 'whatsapp')
+          .maybeSingle();
+      if (row != null) {
+        final metadata = Map<String, dynamic>.from(
+          (row['metadata'] as Map?) ?? const {},
+        );
+        _status = row['status'] as String? ?? 'not_configured';
+        _businessIdController.text =
+            metadata['business_account_id'] as String? ?? '';
+        _phoneIdController.text = metadata['phone_number_id'] as String? ?? '';
+        _phoneController.text =
+            metadata['display_phone_number'] as String? ?? '';
+        _nameController.text = metadata['name'] as String? ?? '';
+      }
+    } on PostgrestException catch (error) {
+      _message = error.message;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_businessIdController.text.trim().isEmpty ||
+        _phoneIdController.text.trim().isEmpty) {
+      setState(
+        () => _message =
+            'Business Account ID y Phone Number ID son obligatorios.',
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client.from('tenant_integrations').upsert({
+        'tenant_id': widget.tenantId,
+        'provider': 'whatsapp',
+        'status': 'configuring',
+        'metadata': {
+          'business_account_id': _businessIdController.text.trim(),
+          'phone_number_id': _phoneIdController.text.trim(),
+          'display_phone_number': _phoneController.text.trim(),
+          'name': _nameController.text.trim(),
+        },
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'tenant_id,provider');
+      if (mounted) {
+        setState(() {
+          _status = 'configuring';
+          _message = 'Datos guardados. La conexión aún debe validarse desde el backend.';
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.link_outlined,
+              size: 32,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Datos de la integración',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Chip(label: Text(_integrationStatusLabel(_status))),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Registra los identificadores públicos de Meta. Los tokens y secretos se gestionarán exclusivamente en backend.',
+        ),
+        const SizedBox(height: 24),
+        _IntegrationField(
+          controller: _businessIdController,
+          label: 'WhatsApp Business Account ID',
+        ),
+        _IntegrationField(
+          controller: _phoneIdController,
+          label: 'Phone Number ID',
+        ),
+        _IntegrationField(
+          controller: _phoneController,
+          label: 'Número mostrado',
+          required: false,
+        ),
+        _IntegrationField(
+          controller: _nameController,
+          label: 'Nombre del canal',
+          required: false,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(_saving ? 'Guardando...' : 'Guardar integración'),
+          ),
+        ),
+        if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
+      ],
+    );
+  }
+}
+
+String _integrationStatusLabel(String status) {
+  switch (status) {
+    case 'active':
+      return 'Activa';
+    case 'configuring':
+      return 'Pendiente de validación';
+    case 'error':
+      return 'Con error';
+    case 'disabled':
+      return 'Deshabilitada';
+    default:
+      return 'No configurada';
+  }
+}
+
+class _IntegrationField extends StatelessWidget {
+  const _IntegrationField({
+    required this.controller,
+    required this.label,
+    this.required = true,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool required;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: required ? '*' : null,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+}
+
+class _WhatsAppSettingPanel extends StatelessWidget {
+  const _WhatsAppSettingPanel({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.actionLabel,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final String actionLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Icon(icon, size: 32, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(height: 12),
+        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        Text(description),
+        const SizedBox(height: 24),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Esta configuración aún no está creada para este tenant.',
+                  ),
+                ),
+                OutlinedButton(onPressed: null, child: Text(actionLabel)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _PersonalSettings extends StatelessWidget {
@@ -2741,8 +3340,10 @@ class _PersonalSettings extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('Información personal',
-            style: Theme.of(context).textTheme.titleLarge),
+        Text(
+          'Información personal',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 8),
         const Text('Administra la información visible de tu usuario.'),
         const SizedBox(height: 24),
@@ -2751,18 +3352,19 @@ class _PersonalSettings extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 42,
-                backgroundImage:
-                    avatarUrl == null ? null : NetworkImage(avatarUrl!),
+                backgroundImage: avatarUrl == null
+                    ? null
+                    : NetworkImage(avatarUrl!),
                 child: avatarUrl != null
                     ? null
                     : Text(
-                  (nameController.text.isEmpty
-                          ? user?.email ?? 'U'
-                          : nameController.text)
-                      .substring(0, 1)
-                      .toUpperCase(),
-                  style: const TextStyle(fontSize: 28),
-                ),
+                        (nameController.text.isEmpty
+                                ? user?.email ?? 'U'
+                                : nameController.text)
+                            .substring(0, 1)
+                            .toUpperCase(),
+                        style: const TextStyle(fontSize: 28),
+                      ),
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
@@ -2796,10 +3398,7 @@ class _PersonalSettings extends StatelessWidget {
           icon: const Icon(Icons.save_outlined),
           label: Text(saving ? 'Guardando...' : 'Guardar información personal'),
         ),
-        if (message != null) ...[
-          const SizedBox(height: 12),
-          Text(message!),
-        ],
+        if (message != null) ...[const SizedBox(height: 12), Text(message!)],
       ],
     );
   }
@@ -2831,10 +3430,14 @@ class _CompanySettings extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text('Información de la empresa',
-            style: Theme.of(context).textTheme.titleLarge),
+        Text(
+          'Información de la empresa',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 8),
-        const Text('Estos datos definirán la experiencia operativa del tenant.'),
+        const Text(
+          'Estos datos definirán la experiencia operativa del tenant.',
+        ),
         const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(18),
@@ -2853,9 +3456,11 @@ class _CompanySettings extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: (tenant['logo_url'] as String?) == null
-                    ? Icon(Icons.business_outlined,
+                    ? Icon(
+                        Icons.business_outlined,
                         size: 34,
-                        color: Theme.of(context).colorScheme.primary)
+                        color: Theme.of(context).colorScheme.primary,
+                      )
                     : ClipRRect(
                         borderRadius: BorderRadius.circular(16),
                         child: Image.network(
@@ -2871,8 +3476,10 @@ class _CompanySettings extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Logo de la empresa',
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      'Logo de la empresa',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 4),
                     const Text('Se mostrará en la barra superior de ITONE.'),
                     const SizedBox(height: 10),
@@ -2904,10 +3511,12 @@ class _CompanySettings extends StatelessWidget {
             border: OutlineInputBorder(),
           ),
           items: _tenantSectors.entries
-              .map((entry) => DropdownMenuItem(
-                    value: entry.key,
-                    child: Text(entry.value),
-                  ))
+              .map(
+                (entry) => DropdownMenuItem(
+                  value: entry.key,
+                  child: Text(entry.value),
+                ),
+              )
               .toList(),
           onChanged: saving
               ? null
@@ -2921,10 +3530,7 @@ class _CompanySettings extends StatelessWidget {
           icon: const Icon(Icons.save_outlined),
           label: Text(saving ? 'Guardando...' : 'Guardar sector'),
         ),
-        if (message != null) ...[
-          const SizedBox(height: 12),
-          Text(message!),
-        ],
+        if (message != null) ...[const SizedBox(height: 12), Text(message!)],
       ],
     );
   }
@@ -2953,8 +3559,10 @@ class _WhatsAppBusinessInbox extends StatelessWidget {
                     padding: const EdgeInsets.all(18),
                     child: Row(
                       children: [
-                        Icon(Icons.chat_outlined,
-                            color: theme.colorScheme.onPrimaryContainer),
+                        Icon(
+                          Icons.chat_outlined,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -3056,7 +3664,11 @@ class _MetricCard extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           child: Row(
             children: [
-              Icon(icon, size: 30, color: Theme.of(context).colorScheme.primary),
+              Icon(
+                icon,
+                size: 30,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               const SizedBox(width: 14),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3104,9 +3716,7 @@ class ConfigurationErrorPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      body: Center(
-        child: Text('La configuración de ITONE está incompleta.'),
-      ),
+      body: Center(child: Text('La configuración de ITONE está incompleta.')),
     );
   }
 }
