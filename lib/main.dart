@@ -3210,6 +3210,9 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final readOnly = !_editing;
+    final hasIntegration =
+        _businessIdController.text.isNotEmpty ||
+        _phoneIdController.text.isNotEmpty;
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -3229,11 +3232,14 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
             ),
             Chip(label: Text(_integrationStatusLabel(_status))),
             const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _saving ? null : () => setState(() => _editing = true),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Editar'),
-            ),
+            if (readOnly)
+              OutlinedButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () => setState(() => _editing = true),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Editar configuración'),
+              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -3241,42 +3247,50 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           'Registra los identificadores públicos de Meta. Los tokens y secretos se gestionarán exclusivamente en backend.',
         ),
         const SizedBox(height: 24),
-        _IntegrationField(
-          controller: _businessIdController,
-          label: 'WhatsApp Business Account ID',
-          readOnly: readOnly,
-        ),
-        _IntegrationField(
-          controller: _phoneIdController,
-          label: 'Phone Number ID',
-          readOnly: readOnly,
-        ),
-        _IntegrationField(
-          controller: _phoneController,
-          label: 'Número mostrado',
-          required: false,
-          readOnly: readOnly,
-        ),
-        _IntegrationField(
-          controller: _nameController,
-          label: 'Nombre del canal',
-          required: false,
-          readOnly: readOnly,
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: Text(_saving ? 'Guardando...' : 'Guardar integración'),
+        if (readOnly)
+          _WhatsAppIntegrationSummary(
+            configured: hasIntegration,
+            businessAccountId: _businessIdController.text,
+            phoneNumberId: _phoneIdController.text,
+            phoneNumber: _phoneController.text,
+            channelName: _nameController.text,
+          )
+        else ...[
+          _IntegrationField(
+            controller: _businessIdController,
+            label: 'WhatsApp Business Account ID',
           ),
-        ),
+          _IntegrationField(
+            controller: _phoneIdController,
+            label: 'Phone Number ID',
+          ),
+          _IntegrationField(
+            controller: _phoneController,
+            label: 'Número mostrado',
+            required: false,
+          ),
+          _IntegrationField(
+            controller: _nameController,
+            label: 'Nombre del canal',
+            required: false,
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: const Icon(Icons.save_outlined),
+              label: Text(_saving ? 'Guardando...' : 'Guardar integración'),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: OutlinedButton.icon(
-            onPressed: _validating || readOnly ? null : _validateConnection,
+            onPressed: _validating || !hasIntegration
+                ? null
+                : _validateConnection,
             icon: const Icon(Icons.verified_outlined),
             label: Text(
               _validating ? 'Validando...' : 'Validar conexión con Meta',
@@ -3292,6 +3306,87 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _WhatsAppIntegrationSummary extends StatelessWidget {
+  const _WhatsAppIntegrationSummary({
+    required this.configured,
+    required this.businessAccountId,
+    required this.phoneNumberId,
+    required this.phoneNumber,
+    required this.channelName,
+  });
+
+  final bool configured;
+  final String businessAccountId;
+  final String phoneNumberId;
+  final String phoneNumber;
+  final String channelName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!configured) {
+      return const Card(
+        child: ListTile(
+          leading: Icon(Icons.link_off_outlined),
+          title: Text('Cuenta de Meta no conectada'),
+          subtitle: Text('Pulsa Editar configuración para registrar el canal.'),
+        ),
+      );
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            _IntegrationSummaryRow(
+              label: 'Cuenta empresarial',
+              value: businessAccountId,
+            ),
+            _IntegrationSummaryRow(
+              label: 'Phone Number ID',
+              value: phoneNumberId,
+            ),
+            _IntegrationSummaryRow(
+              label: 'Número',
+              value: phoneNumber.isEmpty ? 'No registrado' : phoneNumber,
+            ),
+            _IntegrationSummaryRow(
+              label: 'Canal',
+              value: channelName.isEmpty ? 'Sin nombre' : channelName,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IntegrationSummaryRow extends StatelessWidget {
+  const _IntegrationSummaryRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 150,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
     );
   }
 }
@@ -3316,13 +3411,11 @@ class _IntegrationField extends StatelessWidget {
     required this.controller,
     required this.label,
     this.required = true,
-    this.readOnly = false,
   });
 
   final TextEditingController controller;
   final String label;
   final bool required;
-  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -3330,7 +3423,6 @@ class _IntegrationField extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 14),
       child: TextField(
         controller: controller,
-        readOnly: readOnly,
         decoration: InputDecoration(
           labelText: label,
           suffixText: required ? '*' : null,
