@@ -3302,6 +3302,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   bool _loading = true;
   bool _saving = false;
   bool _validating = false;
+  bool _registering = false;
   bool _editing = false;
   String _status = 'not_configured';
   String? _message;
@@ -3428,6 +3429,83 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
     }
   }
 
+  Future<void> _registerNumber() async {
+    final pinController = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Registrar número en Cloud API'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Meta requiere registrar el número con un PIN de verificación '
+              'en dos pasos de 6 dígitos antes de poder enviar mensajes. '
+              'Si el número ya tenía 2FA activo, usa ese mismo PIN; si no, '
+              'este PIN quedará configurado como el nuevo.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: pinController,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(labelText: 'PIN de 6 dígitos'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(pinController.text.trim()),
+            child: const Text('Registrar'),
+          ),
+        ],
+      ),
+    );
+    if (pin == null || !RegExp(r'^\d{6}$').hasMatch(pin)) {
+      if (pin != null && mounted) {
+        setState(() => _message = 'El PIN debe tener exactamente 6 dígitos.');
+      }
+      return;
+    }
+
+    setState(() {
+      _registering = true;
+      _message = null;
+    });
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'register-whatsapp-number',
+        body: {'tenant_id': widget.tenantId, 'pin': pin},
+      );
+      final data = Map<String, dynamic>.from(
+        (response.data as Map?) ?? const {},
+      );
+      if (mounted) {
+        setState(() {
+          _message = data['ok'] == true
+              ? 'Número registrado correctamente en Cloud API. Ya puedes enviar mensajes.'
+              : (data['error'] as String? ?? 'No fue posible registrar el número.');
+        });
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        final errorMessage = details is Map ? details['error'] : null;
+        setState(
+          () => _message =
+              'No fue posible registrar el número: ${errorMessage ?? error.reasonPhrase}',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _registering = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -3507,17 +3585,29 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ],
         const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: _validating || !hasIntegration
-                ? null
-                : _validateConnection,
-            icon: const Icon(Icons.verified_outlined),
-            label: Text(
-              _validating ? 'Validando...' : 'Validar conexión con Meta',
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _validating || !hasIntegration
+                  ? null
+                  : _validateConnection,
+              icon: const Icon(Icons.verified_outlined),
+              label: Text(
+                _validating ? 'Validando...' : 'Validar conexión con Meta',
+              ),
             ),
-          ),
+            OutlinedButton.icon(
+              onPressed: _registering || !hasIntegration
+                  ? null
+                  : _registerNumber,
+              icon: const Icon(Icons.app_registration_outlined),
+              label: Text(
+                _registering ? 'Registrando...' : 'Registrar número en Cloud API',
+              ),
+            ),
+          ],
         ),
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
         if (_blockedEntities.isNotEmpty) ...[
