@@ -1562,7 +1562,7 @@ class TenantWorkspacePage extends StatelessWidget {
   Future<Map<String, dynamic>> _tenant() async {
     return await Supabase.instance.client
         .from('tenants')
-        .select('id, name, slug, created_at')
+        .select('id, name, slug, sector, created_at')
         .eq('id', membership['tenant_id'])
         .single();
   }
@@ -1611,7 +1611,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   Future<List<Map<String, dynamic>>> _loadMemberships() async {
     final rows = await Supabase.instance.client
         .from('tenant_memberships')
-        .select('tenant_id, role, tenants(id, name, slug)')
+        .select('tenant_id, role, tenants(id, name, slug, sector)')
         .eq('user_id', Supabase.instance.client.auth.currentUser!.id);
     final memberships =
         List<Map<String, dynamic>>.from(rows.map((row) => Map<String, dynamic>.from(row)));
@@ -1802,7 +1802,9 @@ class _TenantModuleContent extends StatelessWidget {
                       : 'Módulo preparado para ${tenant['name']}.',
                 ),
                 const SizedBox(height: 28),
-                if (isDashboard) ...[
+                if (isDashboard && tenant['sector'] == 'ips')
+                  const _IpsDashboard()
+                else if (isDashboard) ...[
                   Wrap(
                     spacing: 16,
                     runSpacing: 16,
@@ -1832,6 +1834,13 @@ class _TenantModuleContent extends StatelessWidget {
                   const SizedBox(height: 24),
                 ],
                 if (isWhatsApp) const _WhatsAppBusinessInbox(),
+                if (module.label == 'Configuración')
+                  _TenantConfiguration(
+                    tenant: tenant,
+                    onSaved: (sector) {
+                      tenant['sector'] = sector;
+                    },
+                  ),
                 Card(
                   child: ListTile(
                     leading: Icon(module.icon),
@@ -1854,6 +1863,273 @@ class _TenantModuleContent extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IpsDashboard extends StatelessWidget {
+  const _IpsDashboard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _IpsStatusBanner(),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth > 1100
+                ? (constraints.maxWidth - 80) / 5
+                : constraints.maxWidth > 700
+                    ? (constraints.maxWidth - 16) / 2
+                    : constraints.maxWidth;
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Conversaciones activas',
+                  value: '128',
+                  change: '+15% vs ayer',
+                  icon: Icons.chat,
+                  color: Colors.green,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Manejadas por IA',
+                  value: '89 (69.5%)',
+                  change: '+22% vs ayer',
+                  icon: Icons.smart_toy_outlined,
+                  color: Colors.blue,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Requieren intervención humana',
+                  value: '39 (30.5%)',
+                  change: '-5% vs ayer',
+                  icon: Icons.person_outline,
+                  color: Colors.orange,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Citas agendadas hoy',
+                  value: '34',
+                  change: '+18% vs ayer',
+                  icon: Icons.calendar_month,
+                  color: Colors.deepPurple,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Tiempo promedio respuesta',
+                  value: '1m 24s',
+                  change: '-12% vs ayer',
+                  icon: Icons.schedule,
+                  color: Colors.teal,
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _IpsStatusBanner extends StatelessWidget {
+  const _IpsStatusBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.check_circle, color: Colors.green),
+        title: const Text('Estado del sistema'),
+        subtitle: const Text('Todos los sistemas operativos'),
+        trailing: Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+            color: Colors.green,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IpsMetricCard extends StatelessWidget {
+  const _IpsMetricCard({
+    required this.width,
+    required this.title,
+    required this.value,
+    required this.change,
+    required this.icon,
+    required this.color,
+  });
+
+  final double width;
+  final String title;
+  final String value;
+  final String change;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.15),
+                    foregroundColor: color,
+                    child: Icon(icon),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                change,
+                style: TextStyle(
+                  color: change.startsWith('-') ? Colors.red : Colors.green,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const _tenantSectors = <String, String>{
+  'general': 'Otro / General',
+  'it_services': 'Servicios de TI',
+  'msp': 'MSP / Soporte administrado',
+  'ips': 'IPS / Salud',
+  'therapy_center': 'Centro terapéutico',
+  'consulting': 'Consultoría',
+  'professional_services': 'Servicios profesionales',
+  'logistics': 'Logística y transporte',
+  'construction': 'Construcción',
+  'education': 'Educación',
+  'retail': 'Comercio y ventas',
+  'manufacturing': 'Manufactura',
+  'real_estate': 'Inmobiliaria',
+  'nonprofit': 'Fundación / ONG',
+};
+
+class _TenantConfiguration extends StatefulWidget {
+  const _TenantConfiguration({required this.tenant, required this.onSaved});
+
+  final Map<String, dynamic> tenant;
+  final ValueChanged<String> onSaved;
+
+  @override
+  State<_TenantConfiguration> createState() => _TenantConfigurationState();
+}
+
+class _TenantConfigurationState extends State<_TenantConfiguration> {
+  late String _sector = _tenantSectors.containsKey(widget.tenant['sector'])
+      ? widget.tenant['sector'] as String
+      : 'general';
+  bool _saving = false;
+  String? _message;
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client
+          .from('tenants')
+          .update({'sector': _sector})
+          .eq('id', widget.tenant['id']);
+      widget.onSaved(_sector);
+      if (mounted) setState(() => _message = 'Sector guardado correctamente.');
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } catch (_) {
+      if (mounted) setState(() => _message = 'No fue posible guardar el sector.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Perfil de la empresa',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            const Text(
+              'Selecciona el sector para adaptar el dashboard y las herramientas de tu empresa.',
+            ),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
+              initialValue: _sector,
+              decoration: const InputDecoration(
+                labelText: 'Sector de la empresa',
+                border: OutlineInputBorder(),
+              ),
+              items: _tenantSectors.entries
+                  .map((entry) => DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ))
+                  .toList(),
+              onChanged: _saving ? null : (value) {
+                if (value != null) setState(() => _sector = value);
+              },
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(_saving ? 'Guardando...' : 'Guardar cambios'),
+                ),
+                if (_message != null) ...[
+                  const SizedBox(width: 16),
+                  Expanded(child: Text(_message!)),
+                ],
+              ],
+            ),
+          ],
         ),
       ),
     );
