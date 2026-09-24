@@ -4804,6 +4804,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   bool _loadingMessages = false;
   bool _sending = false;
   String? _error;
+  RealtimeChannel? _realtimeChannel;
 
   SupabaseClient get _client => Supabase.instance.client;
 
@@ -4811,12 +4812,48 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   void initState() {
     super.initState();
     _loadConversations();
+    _subscribeToWhatsAppChanges();
   }
 
   @override
   void dispose() {
     _messageController.dispose();
+    final channel = _realtimeChannel;
+    if (channel != null) {
+      _client.removeChannel(channel);
+    }
     super.dispose();
+  }
+
+  void _subscribeToWhatsAppChanges() {
+    _realtimeChannel = _client
+        .channel('whatsapp-inbox-${widget.tenantId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'whatsapp_conversations',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'tenant_id',
+            value: widget.tenantId,
+          ),
+          callback: (_) => _loadConversations(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'whatsapp_messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'tenant_id',
+            value: widget.tenantId,
+          ),
+          callback: (_) async {
+            await _loadConversations();
+            await _loadMessages();
+          },
+        )
+        .subscribe();
   }
 
   Future<void> _loadConversations({bool preserveSelection = true}) async {

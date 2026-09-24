@@ -140,6 +140,7 @@ Deno.serve(async (request) => {
         direction: "outbound",
         message_type: "text",
         body: messageBody.trim(),
+        delivery_status: "sent",
       });
     if (insertError) throw insertError;
 

@@ -47,16 +47,6 @@ Deno.serve(async (request) => {
         const value = change.value;
         const phoneNumberId = value?.metadata?.phone_number_id;
         if (typeof phoneNumberId !== "string") continue;
-        for (const status of value.statuses ?? []) {
-          console.log("WhatsApp message status received", {
-            phoneNumberId,
-            messageId: status.id,
-            status: status.status,
-            recipientId: status.recipient_id,
-            timestamp: status.timestamp,
-          });
-        }
-
         const { data: account, error: accountError } = await client
           .from("whatsapp_accounts")
           .select("id, tenant_id")
@@ -67,6 +57,29 @@ Deno.serve(async (request) => {
         if (!account) {
           console.warn("Unmapped WhatsApp phone_number_id", phoneNumberId);
           continue;
+        }
+
+        for (const status of value.statuses ?? []) {
+          console.log("WhatsApp message status received", {
+            phoneNumberId,
+            messageId: status.id,
+            status: status.status,
+            recipientId: status.recipient_id,
+            timestamp: status.timestamp,
+          });
+          if (typeof status.id === "string" && typeof status.status === "string") {
+            const deliveryStatus = ["sent", "delivered", "read", "failed"].includes(
+              status.status,
+            )
+              ? status.status
+              : "accepted";
+            const { error: statusError } = await client
+              .from("whatsapp_messages")
+              .update({ delivery_status: deliveryStatus })
+              .eq("provider_message_id", status.id)
+              .eq("whatsapp_account_id", account.id);
+            if (statusError) console.error("WhatsApp status update failed", statusError);
+          }
         }
 
         for (const message of value.messages ?? []) {
