@@ -2332,7 +2332,10 @@ class _TenantModuleContent extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                 ],
-                if (isWhatsApp) const _WhatsAppBusinessInbox(),
+                if (isWhatsApp)
+                  _WhatsAppBusinessInbox(
+                    tenantId: tenant['id'] as String,
+                  ),
                 if (module.label == 'Configuración')
                   _TenantConfiguration(
                     tenant: tenant,
@@ -4783,8 +4786,140 @@ class _CompanySettings extends StatelessWidget {
   }
 }
 
-class _WhatsAppBusinessInbox extends StatelessWidget {
-  const _WhatsAppBusinessInbox();
+class _WhatsAppBusinessInbox extends StatefulWidget {
+  const _WhatsAppBusinessInbox({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_WhatsAppBusinessInbox> createState() => _WhatsAppBusinessInboxState();
+}
+
+class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
+  final _messageController = TextEditingController();
+  List<Map<String, dynamic>> _conversations = [];
+  List<Map<String, dynamic>> _messages = [];
+  String? _selectedConversationId;
+  bool _loading = true;
+  bool _loadingMessages = false;
+  bool _sending = false;
+  String? _error;
+
+  SupabaseClient get _client => Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConversations();
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadConversations({bool preserveSelection = true}) async {
+    try {
+      final rows = await _client
+          .from('whatsapp_conversations')
+          .select('id, status, last_message_at, updated_at, whatsapp_contacts(display_name, profile_name, phone_number)')
+          .eq('tenant_id', widget.tenantId)
+          .order('updated_at', ascending: false);
+      final conversations = (rows as List)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _conversations = conversations;
+        _loading = false;
+        _error = null;
+        if (!preserveSelection ||
+            _selectedConversationId == null ||
+            !conversations.any((row) => row['id'] == _selectedConversationId)) {
+          _selectedConversationId = conversations.isEmpty
+              ? null
+              : conversations.first['id'] as String;
+        }
+      });
+      if (_selectedConversationId != null) await _loadMessages();
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() { _loading = false; _error = error.message; });
+    }
+  }
+
+  Future<void> _loadMessages() async {
+    final conversationId = _selectedConversationId;
+    if (conversationId == null) {
+      if (mounted) setState(() => _messages = []);
+      return;
+    }
+    setState(() => _loadingMessages = true);
+    try {
+      final rows = await _client
+          .from('whatsapp_messages')
+          .select('id, direction, message_type, body, created_at, provider_timestamp')
+          .eq('tenant_id', widget.tenantId)
+          .eq('conversation_id', conversationId)
+          .order('created_at');
+      if (!mounted || conversationId != _selectedConversationId) return;
+      setState(() {
+        _messages = (rows as List)
+            .map((row) => Map<String, dynamic>.from(row as Map))
+            .toList();
+        _loadingMessages = false;
+      });
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() { _loadingMessages = false; _error = error.message; });
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final conversationId = _selectedConversationId;
+    final message = _messageController.text.trim();
+    if (conversationId == null || message.isEmpty || _sending) return;
+    setState(() { _sending = true; _error = null; });
+    try {
+      await _client.functions.invoke(
+        'send-whatsapp-message',
+        body: {
+          'tenant_id': widget.tenantId,
+          'conversation_id': conversationId,
+          'message': message,
+        },
+      );
+      _messageController.clear();
+      await _loadConversations();
+    } on FunctionException catch (error) {
+      if (mounted) setState(() => _error = error.details?.toString() ?? error.reasonPhrase);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Map<String, dynamic>? get _selectedConversation {
+    for (final conversation in _conversations) {
+      if (conversation['id'] == _selectedConversationId) return conversation;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _contact(Map<String, dynamic> conversation) {
+    final value = conversation['whatsapp_contacts'];
+    return value is List
+        ? (value.isEmpty ? <String, dynamic>{} : Map<String, dynamic>.from(value.first as Map))
+        : Map<String, dynamic>.from((value as Map?) ?? const {});
+  }
+
+  String _contactName(Map<String, dynamic> contact) =>
+      (contact['display_name'] ?? contact['profile_name'] ?? contact['phone_number'] ?? 'Contacto') as String;
+
+  String _formatDate(String? value) {
+    if (value == null) return '';
+    final date = DateTime.tryParse(value)?.toLocal();
+    if (date == null) return '';
+    return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4797,18 +4932,20 @@ class _WhatsAppBusinessInbox extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
             height: 650,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(width: 300, child: _conversationList(theme)),
-                const VerticalDivider(width: 1),
-                Expanded(child: _conversationPanel(theme)),
-                if (showProfile) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(width: 270, child: _contactProfile(theme)),
-                ],
-              ],
-            ),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(width: 300, child: _conversationList(theme)),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: _conversationPanel(theme)),
+                      if (showProfile) ...[
+                        const VerticalDivider(width: 1),
+                        SizedBox(width: 270, child: _contactProfile(theme)),
+                      ],
+                    ],
+                  ),
           ),
         );
       },
@@ -4816,115 +4953,67 @@ class _WhatsAppBusinessInbox extends StatelessWidget {
   }
 
   Widget _conversationList(ThemeData theme) {
-    final conversations = [
-      ('María González', 'Necesito información sobre el servicio', '10:30'),
-      ('Juan Pérez', 'Consulta sobre mi solicitud', '10:28'),
-      ('Ana Rodríguez', 'Información sobre servicios', '10:25'),
-      ('Carlos Ruiz', 'Cancelación de cita', '10:20'),
-      ('Laura Martínez', 'Nueva autorización', '10:18'),
-      ('Roberto Silva', 'Consulta pendiente', '10:15'),
-    ];
     return Column(
       children: [
         Container(
           color: theme.colorScheme.primaryContainer,
           padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Centro de conversaciones',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Filtrar',
-                onPressed: null,
-                icon: const Icon(Icons.tune),
-              ),
-            ],
-          ),
+          child: Row(children: [
+            Expanded(child: Text('Centro de conversaciones', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer))),
+            IconButton(tooltip: 'Actualizar', onPressed: _loadConversations, icon: const Icon(Icons.refresh)),
+          ]),
         ),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: TextField(
-            enabled: false,
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              hintText: 'Buscar conversaciones...',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
-              isDense: true,
-            ),
-          ),
-        ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: TextStyle(color: theme.colorScheme.error))),
         const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            children: [
-              _InboxFilter(label: 'Todas', selected: true),
-              _InboxFilter(label: 'Pendientes'),
-              _InboxFilter(label: 'Cerradas'),
-            ],
-          ),
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [_InboxFilter(label: 'Todas', selected: true), _InboxFilter(label: 'Pendientes'), _InboxFilter(label: 'Cerradas')]),
         ),
-        const Divider(height: 20),
+        const Divider(height: 1),
         Expanded(
-          child: ListView.separated(
-            itemCount: conversations.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final conversation = conversations[index];
-              return ListTile(
-                selected: index == 0,
-                selectedTileColor: theme.colorScheme.primaryContainer
-                    .withValues(alpha: 0.45),
-                leading: CircleAvatar(
-                  backgroundColor: theme.colorScheme.primary.withValues(
-                    alpha: 0.14,
-                  ),
-                  child: Text(conversation.$1.substring(0, 1)),
+          child: _conversations.isEmpty
+              ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Aún no hay conversaciones. Los mensajes entrantes aparecerán aquí.')))
+              : ListView.separated(
+                  itemCount: _conversations.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final conversation = _conversations[index];
+                    final contact = _contact(conversation);
+                    final name = _contactName(contact);
+                    return ListTile(
+                      selected: conversation['id'] == _selectedConversationId,
+                      selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                      onTap: () async {
+                        setState(() => _selectedConversationId = conversation['id'] as String);
+                        await _loadMessages();
+                      },
+                      leading: CircleAvatar(backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase())),
+                      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(contact['phone_number'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: Text(_formatDate(conversation['last_message_at'] as String?), style: theme.textTheme.labelSmall),
+                    );
+                  },
                 ),
-                title: Text(
-                  conversation.$1,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text(
-                  conversation.$2,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Text(
-                  conversation.$3,
-                  style: theme.textTheme.labelSmall,
-                ),
-              );
-            },
-          ),
         ),
       ],
     );
   }
 
   Widget _conversationPanel(ThemeData theme) {
+    final conversation = _selectedConversation;
+    if (conversation == null) {
+      return const Center(child: Text('Selecciona una conversación para comenzar.'));
+    }
+    final contact = _contact(conversation);
+    final name = _contactName(contact);
     return Column(
       children: [
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-          leading: CircleAvatar(
-            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14),
-            child: const Text('M'),
-          ),
-          title: const Text(
-            'María González',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          subtitle: const Text('+57 300 123 4567 · En línea'),
-          trailing: const Icon(Icons.more_vert),
+          leading: CircleAvatar(backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase())),
+          title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(contact['phone_number'] as String? ?? 'WhatsApp'),
+          trailing: IconButton(tooltip: 'Actualizar mensajes', onPressed: _loadMessages, icon: const Icon(Icons.refresh)),
         ),
         const Divider(height: 1),
         Expanded(
@@ -4932,121 +5021,56 @@ class _WhatsAppBusinessInbox extends StatelessWidget {
             width: double.infinity,
             color: const Color(0xFFF8FAFC),
             padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: _MessageBubble(
-                    text: 'Necesito información sobre el servicio',
-                    sent: true,
-                    theme: theme,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _MessageBubble(
-                    text: '¡Hola! Con gusto te ayudamos. ¿Qué servicio necesitas?',
-                    sent: false,
-                    theme: theme,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: _MessageBubble(
-                    text: 'Quisiera conocer los requisitos.',
-                    sent: true,
-                    theme: theme,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  'Las conversaciones reales aparecerán aquí cuando se conecte el webhook.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
+            child: _loadingMessages
+                ? const Center(child: CircularProgressIndicator())
+                : _messages.isEmpty
+                    ? const Center(child: Text('No hay mensajes en esta conversación.'))
+                    : ListView.builder(
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final message = _messages[index];
+                          final sent = message['direction'] == 'outbound';
+                          return Align(
+                            alignment: sent ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _MessageBubble(text: message['body'] as String? ?? '[Mensaje no compatible]', sent: sent, theme: theme),
+                            ),
+                          );
+                        },
+                      ),
           ),
         ),
         Padding(
           padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  enabled: false,
-                  decoration: InputDecoration(
-                    hintText: 'Escribe un mensaje...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    isDense: true,
-                    prefixIcon: const Icon(Icons.attach_file),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              IconButton.filled(
-                tooltip: 'Enviar mensaje',
-                onPressed: null,
-                icon: const Icon(Icons.send),
-              ),
-            ],
-          ),
+          child: Row(children: [
+            Expanded(child: TextField(controller: _messageController, enabled: !_sending, onSubmitted: (_) => _sendMessage(), decoration: InputDecoration(hintText: 'Escribe un mensaje...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)), isDense: true))),
+            const SizedBox(width: 10),
+            IconButton.filled(tooltip: 'Enviar mensaje', onPressed: _sending ? null : _sendMessage, icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send)),
+          ]),
         ),
       ],
     );
   }
 
   Widget _contactProfile(ThemeData theme) {
-    return Column(
-      children: [
-        ListTile(
-          title: Text(
-            'Perfil del contacto',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          trailing: TextButton(onPressed: null, child: const Text('Editar')),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              CircleAvatar(
-                radius: 38,
-                backgroundColor: theme.colorScheme.primary.withValues(
-                  alpha: 0.14,
-                ),
-                child: Text(
-                  'M',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'María González',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Text('+57 300 123 4567'),
-              const SizedBox(height: 28),
-              const _ProfileValue(label: 'Estado', value: 'Pendiente'),
-              const _ProfileValue(label: 'Último contacto', value: 'Hoy'),
-              const _ProfileValue(label: 'Canal', value: 'WhatsApp'),
-              const _ProfileValue(label: 'Etiquetas', value: 'Nuevo contacto'),
-            ],
-          ),
-        ),
-      ],
-    );
+    final conversation = _selectedConversation;
+    if (conversation == null) return const SizedBox.shrink();
+    final contact = _contact(conversation);
+    final name = _contactName(contact);
+    return Column(children: [
+      ListTile(title: Text('Perfil del contacto', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+      const Divider(height: 1),
+      Padding(padding: const EdgeInsets.all(20), child: Column(children: [
+        CircleAvatar(radius: 38, backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase(), style: theme.textTheme.headlineSmall?.copyWith(color: theme.colorScheme.primary))),
+        const SizedBox(height: 12),
+        Text(name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        Text(contact['phone_number'] as String? ?? ''),
+        const SizedBox(height: 28),
+        const _ProfileValue(label: 'Canal', value: 'WhatsApp'),
+        _ProfileValue(label: 'Estado', value: conversation['status'] as String? ?? 'open'),
+      ])),
+    ]);
   }
 }
 
