@@ -1698,18 +1698,16 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
       backgroundColor: const Color(0xFFF5F6F8),
       appBar: AppBar(
         leading: IconButton(
-          tooltip: _sidebarCollapsed ? 'Expandir menú' : 'Contraer menú',
-          onPressed: () => setState(() {
-            _sidebarCollapsed = !_sidebarCollapsed;
-          }),
-          icon: const Icon(Icons.menu),
+          tooltip: 'Regresar',
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            }
+          },
+          icon: const Icon(Icons.arrow_back),
         ),
         title: Row(
           children: [
-            if (!_sidebarCollapsed) ...[
-              _TenantBrand(tenant: tenant, height: 44),
-              const SizedBox(width: 28),
-            ],
             FutureBuilder<Map<String, dynamic>?>(
               future: _profile,
               builder: (context, snapshot) {
@@ -1787,6 +1785,9 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
             selectedIndex: _selectedIndex,
             role: _role,
             collapsed: _sidebarCollapsed,
+            onToggle: () => setState(() {
+              _sidebarCollapsed = !_sidebarCollapsed;
+            }),
             onSelected: (index) => setState(() => _selectedIndex = index),
             onLogout: () => Supabase.instance.client.auth.signOut(),
           ),
@@ -1810,6 +1811,7 @@ class _TenantSidebar extends StatelessWidget {
     required this.selectedIndex,
     required this.role,
     required this.collapsed,
+    required this.onToggle,
     required this.onSelected,
     required this.onLogout,
   });
@@ -1819,6 +1821,7 @@ class _TenantSidebar extends StatelessWidget {
   final int selectedIndex;
   final String role;
   final bool collapsed;
+  final VoidCallback onToggle;
   final ValueChanged<int> onSelected;
   final VoidCallback onLogout;
 
@@ -1835,18 +1838,36 @@ class _TenantSidebar extends StatelessWidget {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(collapsed ? 12 : 20, 20, 12, 18),
-            child: Row(
-              children: [
-                if (collapsed)
-                  Expanded(
-                    child: _TenantBrand(
-                      tenant: tenant,
-                      centered: true,
-                      height: 42,
-                    ),
+            child: collapsed
+                ? Column(
+                    children: [
+                      _TenantBrand(
+                        tenant: tenant,
+                        centered: true,
+                        height: 42,
+                      ),
+                      IconButton(
+                        tooltip: 'Expandir menú',
+                        onPressed: onToggle,
+                        icon: const Icon(Icons.menu),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Contraer menú',
+                        onPressed: onToggle,
+                        icon: const Icon(Icons.menu),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: _TenantBrand(tenant: tenant, height: 42),
+                        ),
+                      ),
+                    ],
                   ),
-              ],
-            ),
           ),
           const Divider(height: 1),
           Expanded(
