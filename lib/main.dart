@@ -75,17 +75,14 @@ class PrivacyPolicyPage extends StatelessWidget {
         title: Row(
           children: [
             Image.network(
-              '/icons/Icon-512.png',
-              width: 38,
+              '/branding/itone-logo.png',
+              width: 150,
               height: 38,
+              fit: BoxFit.contain,
               errorBuilder: (_, _, _) =>
                   const Icon(Icons.business, color: Color(0xFF1264D8)),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'ITONE',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
           ],
         ),
       ),
