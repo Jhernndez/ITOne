@@ -11,6 +11,72 @@ function isoTimestamp(value: unknown): string | null {
   return new Date(Number(value) * 1000).toISOString();
 }
 
+// Best-effort extraction of a human-readable body for every message type
+// WhatsApp Cloud API can deliver. Media types have no text content, but we
+// surface captions/filenames so the UI has something meaningful to show.
+// When Meta itself marks a message as "unsupported" it never forwards the
+// original content (e.g. view-once media, polls); we surface Meta's own
+// explanation from message.errors instead of pretending we can read it.
+function extractMessageBody(message: Record<string, any>): string | null {
+  switch (message.type) {
+    case "text":
+      return message.text?.body ?? null;
+    case "image":
+      return message.image?.caption ?? "[Imagen recibida]";
+    case "video":
+      return message.video?.caption ?? "[Video recibido]";
+    case "audio":
+      return "[Audio recibido]";
+    case "voice":
+      return "[Nota de voz recibida]";
+    case "sticker":
+      return "[Sticker recibido]";
+    case "document":
+      return message.document?.caption ??
+        (message.document?.filename
+          ? `[Documento: ${message.document.filename}]`
+          : "[Documento recibido]");
+    case "location": {
+      const loc = message.location;
+      if (!loc) return "[Ubicación recibida]";
+      return loc.name
+        ? `[Ubicación: ${loc.name}]`
+        : `[Ubicación: ${loc.latitude}, ${loc.longitude}]`;
+    }
+    case "contacts": {
+      const names = (message.contacts ?? [])
+        .map((entry: any) => entry?.name?.formatted_name)
+        .filter((name: unknown) => typeof name === "string");
+      return names.length ? `[Contacto: ${names.join(", ")}]` : "[Contacto recibido]";
+    }
+    case "button":
+      return message.button?.text ?? "[Respuesta de botón]";
+    case "interactive": {
+      const interactive = message.interactive;
+      const reply =
+        interactive?.button_reply?.title ?? interactive?.list_reply?.title;
+      return reply ? `[Respuesta: ${reply}]` : "[Mensaje interactivo recibido]";
+    }
+    case "reaction":
+      return message.reaction?.emoji
+        ? `[Reacción: ${message.reaction.emoji}]`
+        : "[Reacción recibida]";
+    case "system":
+      return message.system?.body ?? "[Notificación del sistema]";
+    case "unsupported": {
+      const detail = Array.isArray(message.errors) ? message.errors[0] : null;
+      const reason = detail
+        ? [detail.title, detail.message].filter(Boolean).join(": ")
+        : null;
+      return reason
+        ? `[Mensaje no compatible con la API de WhatsApp: ${reason}. Ábrelo desde la app de WhatsApp del número para leerlo.]`
+        : "[Mensaje no compatible con la API de WhatsApp. Ábrelo desde la app de WhatsApp del número para leerlo.]";
+    }
+    default:
+      return null;
+  }
+}
+
 Deno.serve(async (request) => {
   const verifyToken = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
   try {
@@ -140,9 +206,7 @@ Deno.serve(async (request) => {
             .single();
           if (conversationError) throw conversationError;
 
-          const body = message.type === "text"
-              ? message.text?.body ?? null
-              : null;
+          const body = extractMessageBody(message);
           const { error: messageError } = await client
             .from("whatsapp_messages")
             .upsert({
