@@ -1803,7 +1803,9 @@ class _TenantModuleContent extends StatelessWidget {
                 ),
                 const SizedBox(height: 28),
                 if (isDashboard && tenant['sector'] == 'ips')
-                  const _IpsDashboard()
+                  role == 'operator'
+                      ? const _IpsAgentDashboard()
+                      : const _IpsDashboard()
                 else if (isDashboard) ...[
                   Wrap(
                     spacing: 16,
@@ -1929,6 +1931,66 @@ class _IpsDashboard extends StatelessWidget {
                   change: '-12% vs ayer',
                   icon: Icons.schedule,
                   color: Colors.teal,
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _IpsAgentDashboard extends StatelessWidget {
+  const _IpsAgentDashboard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _IpsStatusBanner(),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth > 700
+                ? (constraints.maxWidth - 16) / 2
+                : constraints.maxWidth;
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Mis chats pendientes',
+                  value: '0',
+                  change: 'Sin conversaciones asignadas',
+                  icon: Icons.chat_outlined,
+                  color: Colors.blue,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Citas de hoy',
+                  value: '0',
+                  change: 'Agenda del día',
+                  icon: Icons.calendar_month,
+                  color: Colors.deepPurple,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Tiempo de respuesta',
+                  value: '--',
+                  change: 'Aún sin datos',
+                  icon: Icons.schedule,
+                  color: Colors.teal,
+                ),
+                _IpsMetricCard(
+                  width: width,
+                  title: 'Atención humana',
+                  value: 'Activa',
+                  change: 'Tienes acceso a soporte',
+                  icon: Icons.person_outline,
+                  color: Colors.green,
                 ),
               ],
             );
