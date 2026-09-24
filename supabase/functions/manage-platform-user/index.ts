@@ -71,6 +71,11 @@ Deno.serve(async (request) => {
         ban_duration: "876000h",
       });
       if (error) throw error;
+      const { error: signOutError } = await admin.auth.admin.signOut(
+        targetUserId,
+        "global",
+      );
+      if (signOutError) throw signOutError;
     } else if (action === "enable") {
       const { error } = await admin.auth.admin.updateUserById(targetUserId, {
         ban_duration: "none",

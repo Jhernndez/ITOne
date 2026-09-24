@@ -64,6 +64,13 @@ class TenantRouter extends StatelessWidget {
   Future<WorkspaceOptions> _workspaces() async {
     final client = Supabase.instance.client;
     final user = client.auth.currentUser!;
+    final disabled = await client.rpc('is_current_user_disabled') as bool? ?? false;
+    if (disabled) {
+      await client.auth.signOut();
+      throw const AuthException(
+        'Tu usuario está deshabilitado. Contacta al administrador.',
+      );
+    }
     final invitationId = user.userMetadata?['platform_invitation_id'];
     final invitationAccepted =
         user.userMetadata?['platform_invitation_accepted'] == true;
