@@ -53,6 +53,7 @@ Deno.serve(async (request) => {
     }
     const admin = createClient(url, serviceKey);
     const action = body.action;
+    console.log("Managing platform user action", { action, targetUserId });
 
     if (action === "reset_password") {
       const { data: target, error: targetError } =

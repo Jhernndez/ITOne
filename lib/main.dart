@@ -905,15 +905,12 @@ class _PanelAction extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
-            const SizedBox(width: 6),
-            Text(label),
-          ],
+  Widget build(BuildContext context) => TextButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 20),
+        label: Text(label),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         ),
       );
 }
