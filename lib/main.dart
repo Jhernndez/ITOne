@@ -2294,10 +2294,17 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
         'updated_at': DateTime.now().toIso8601String(),
       });
       if (mounted) setState(() => _message = 'Foto actualizada.');
+    } on StorageException catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Error de almacenamiento: ${error.message}');
+      }
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
-      if (mounted) setState(() => _message = 'No fue posible subir la foto.');
+      if (mounted) {
+        setState(() => _message =
+            'No fue posible subir la foto. Revisa el bucket user-avatars.');
+      }
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
