@@ -37,10 +37,10 @@ Deno.serve(async (request) => {
       .from("platform_memberships")
       .select("role")
       .eq("user_id", user.id)
-      .eq("role", "platform_owner")
+      .in("role", ["platform_owner", "platform_admin"])
       .maybeSingle();
     if (ownerError || !owner) {
-      return new Response("Platform owner access required", {
+      return new Response("Platform administrator access required", {
         status: 403,
         headers: corsHeaders,
       });

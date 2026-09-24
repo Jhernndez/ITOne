@@ -11,9 +11,10 @@ as $$
 begin
   if not exists (
     select 1 from public.platform_memberships
-    where user_id = auth.uid() and role = 'platform_owner'
+    where user_id = auth.uid()
+      and role in ('platform_owner', 'platform_admin')
   ) then
-    raise exception 'Platform owner access required';
+    raise exception 'Platform administrator access required';
   end if;
 
   if p_user_id = auth.uid() then

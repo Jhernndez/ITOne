@@ -721,6 +721,7 @@ class _UserSidePanel extends StatefulWidget {
 class _UserSidePanelState extends State<_UserSidePanel> {
   int _tab = 0;
   final _emailController = TextEditingController();
+  late bool _disabled = widget.user?['is_disabled'] as bool? ?? false;
   bool get _isNew => widget.user == null;
 
   @override
@@ -785,13 +786,23 @@ class _UserSidePanelState extends State<_UserSidePanel> {
                         ),
                       ),
                       _PanelAction(
-                        icon: Icons.block,
-                        label: 'Deshabilitar usuario',
-                        onTap: () => widget.onAction(
-                          'disable',
-                          'Deshabilitar usuario',
-                          'El usuario no podrá iniciar sesión.',
-                        ),
+                        icon: _disabled ? Icons.check_circle : Icons.block,
+                        label: _disabled ? 'Activar usuario' : 'Deshabilitar usuario',
+                        onTap: () async {
+                          final action = _disabled ? 'enable' : 'disable';
+                          await widget.onAction(
+                            action,
+                            _disabled
+                                ? 'Activar usuario'
+                                : 'Deshabilitar usuario',
+                            _disabled
+                                ? 'El usuario podrá iniciar sesión nuevamente.'
+                                : 'El usuario no podrá iniciar sesión.',
+                          );
+                          if (mounted) {
+                            setState(() => _disabled = !_disabled);
+                          }
+                        },
                       ),
                       _PanelAction(
                         icon: Icons.delete_outline,
