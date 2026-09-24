@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -1895,40 +1896,40 @@ class _IpsDashboard extends StatelessWidget {
                 _IpsMetricCard(
                   width: width,
                   title: 'Conversaciones activas',
-                  value: '128',
-                  change: '+15% vs ayer',
+                  value: '--',
+                  change: 'Disponible cuando conectemos WhatsApp',
                   icon: Icons.chat,
                   color: Colors.green,
                 ),
                 _IpsMetricCard(
                   width: width,
                   title: 'Manejadas por IA',
-                  value: '89 (69.5%)',
-                  change: '+22% vs ayer',
+                  value: '--',
+                  change: 'Disponible cuando configuremos IA',
                   icon: Icons.smart_toy_outlined,
                   color: Colors.blue,
                 ),
                 _IpsMetricCard(
                   width: width,
                   title: 'Requieren intervención humana',
-                  value: '39 (30.5%)',
-                  change: '-5% vs ayer',
+                  value: '--',
+                  change: 'Disponible cuando existan conversaciones',
                   icon: Icons.person_outline,
                   color: Colors.orange,
                 ),
                 _IpsMetricCard(
                   width: width,
                   title: 'Citas agendadas hoy',
-                  value: '34',
-                  change: '+18% vs ayer',
+                  value: '--',
+                  change: 'Disponible cuando configuremos agenda',
                   icon: Icons.calendar_month,
                   color: Colors.deepPurple,
                 ),
                 _IpsMetricCard(
                   width: width,
                   title: 'Tiempo promedio respuesta',
-                  value: '1m 24s',
-                  change: '-12% vs ayer',
+                  value: '--',
+                  change: 'Disponible cuando existan atenciones',
                   icon: Icons.schedule,
                   color: Colors.teal,
                 ),
@@ -2119,11 +2120,88 @@ class _TenantConfiguration extends StatefulWidget {
 }
 
 class _TenantConfigurationState extends State<_TenantConfiguration> {
+  final _nameController = TextEditingController();
   late String _sector = _tenantSectors.containsKey(widget.tenant['sector'])
       ? widget.tenant['sector'] as String
       : 'general';
   bool _saving = false;
+  bool _uploading = false;
   String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final row = await Supabase.instance.client
+        .from('user_profiles')
+        .select('full_name')
+        .eq('user_id', user.id)
+        .maybeSingle();
+    if (mounted && row != null) {
+      _nameController.text = row['full_name'] as String? ?? '';
+      setState(() {});
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    setState(() => _saving = true);
+    try {
+      await Supabase.instance.client.from('user_profiles').upsert({
+        'user_id': user.id,
+        'full_name': _nameController.text.trim(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      if (mounted) setState(() => _message = 'Información personal guardada.');
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _pickAvatar() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (file == null) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final path = '${user.id}/avatar.${file.name.split('.').last}';
+      await Supabase.instance.client.storage.from('user-avatars').uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(upsert: true),
+          );
+      final url =
+          Supabase.instance.client.storage.from('user-avatars').getPublicUrl(path);
+      await Supabase.instance.client.from('user_profiles').upsert({
+        'user_id': user.id,
+        'avatar_url': url,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      if (mounted) setState(() => _message = 'Foto actualizada.');
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } catch (_) {
+      if (mounted) setState(() => _message = 'No fue posible subir la foto.');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
 
   Future<void> _save() async {
     setState(() {
@@ -2149,51 +2227,223 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Perfil de la empresa',
-                style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            const Text(
-              'Selecciona el sector para adaptar el dashboard y las herramientas de tu empresa.',
-            ),
-            const SizedBox(height: 20),
-            DropdownButtonFormField<String>(
-              initialValue: _sector,
-              decoration: const InputDecoration(
-                labelText: 'Sector de la empresa',
-                border: OutlineInputBorder(),
-              ),
-              items: _tenantSectors.entries
-                  .map((entry) => DropdownMenuItem(
-                        value: entry.key,
-                        child: Text(entry.value),
-                      ))
-                  .toList(),
-              onChanged: _saving ? null : (value) {
-                if (value != null) setState(() => _sector = value);
-              },
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(_saving ? 'Guardando...' : 'Guardar cambios'),
+      child: SizedBox(
+          height: 520,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 220,
+                child: Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    children: [
+                      ListTile(
+                        selected: true,
+                        leading: const Icon(Icons.tune),
+                        title: const Text('General'),
+                        subtitle: const Text('Cuenta y empresa'),
+                        onTap: () {},
+                      ),
+                    ],
+                  ),
                 ),
-                if (_message != null) ...[
-                  const SizedBox(width: 16),
-                  Expanded(child: Text(_message!)),
-                ],
-              ],
-            ),
-          ],
-        ),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    children: [
+                      const TabBar(
+                        tabs: [
+                          Tab(text: 'Información personal'),
+                          Tab(text: 'Información de la empresa'),
+                        ],
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            _PersonalSettings(
+                              nameController: _nameController,
+                              saving: _saving,
+                              uploading: _uploading,
+                              message: _message,
+                              onSave: _saveProfile,
+                              onPickAvatar: _pickAvatar,
+                            ),
+                            _CompanySettings(
+                              tenant: widget.tenant,
+                              sector: _sector,
+                              saving: _saving,
+                              message: _message,
+                              onSectorChanged: (value) =>
+                                  setState(() => _sector = value),
+                              onSave: _save,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
       ),
+    );
+  }
+}
+
+class _PersonalSettings extends StatelessWidget {
+  const _PersonalSettings({
+    required this.nameController,
+    required this.saving,
+    required this.uploading,
+    required this.message,
+    required this.onSave,
+    required this.onPickAvatar,
+  });
+
+  final TextEditingController nameController;
+  final bool saving;
+  final bool uploading;
+  final String? message;
+  final VoidCallback onSave;
+  final VoidCallback onPickAvatar;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text('Información personal',
+            style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        const Text('Administra la información visible de tu usuario.'),
+        const SizedBox(height: 24),
+        Center(
+          child: Column(
+            children: [
+              CircleAvatar(
+                radius: 42,
+                child: Text(
+                  (nameController.text.isEmpty
+                          ? user?.email ?? 'U'
+                          : nameController.text)
+                      .substring(0, 1)
+                      .toUpperCase(),
+                  style: const TextStyle(fontSize: 28),
+                ),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: uploading ? null : onPickAvatar,
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: Text(uploading ? 'Subiendo...' : 'Subir foto'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la persona',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextFormField(
+          initialValue: user?.email ?? '',
+          readOnly: true,
+          decoration: const InputDecoration(
+            labelText: 'Correo electrónico',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 18),
+        FilledButton.icon(
+          onPressed: saving ? null : onSave,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(saving ? 'Guardando...' : 'Guardar información personal'),
+        ),
+        if (message != null) ...[
+          const SizedBox(height: 12),
+          Text(message!),
+        ],
+      ],
+    );
+  }
+}
+
+class _CompanySettings extends StatelessWidget {
+  const _CompanySettings({
+    required this.tenant,
+    required this.sector,
+    required this.saving,
+    required this.message,
+    required this.onSectorChanged,
+    required this.onSave,
+  });
+
+  final Map<String, dynamic> tenant;
+  final String sector;
+  final bool saving;
+  final String? message;
+  final ValueChanged<String> onSectorChanged;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text('Información de la empresa',
+            style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        const Text('Estos datos definirán la experiencia operativa del tenant.'),
+        const SizedBox(height: 24),
+        TextFormField(
+          initialValue: tenant['name'] as String? ?? '',
+          readOnly: true,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la empresa',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<String>(
+          initialValue: sector,
+          decoration: const InputDecoration(
+            labelText: 'Sector de la empresa',
+            border: OutlineInputBorder(),
+          ),
+          items: _tenantSectors.entries
+              .map((entry) => DropdownMenuItem(
+                    value: entry.key,
+                    child: Text(entry.value),
+                  ))
+              .toList(),
+          onChanged: saving
+              ? null
+              : (value) {
+                  if (value != null) onSectorChanged(value);
+                },
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: saving ? null : onSave,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(saving ? 'Guardando...' : 'Guardar sector'),
+        ),
+        if (message != null) ...[
+          const SizedBox(height: 12),
+          Text(message!),
+        ],
+      ],
     );
   }
 }
