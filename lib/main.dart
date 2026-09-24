@@ -1607,7 +1607,20 @@ class TenantOperationsShell extends StatefulWidget {
 class _TenantOperationsShellState extends State<TenantOperationsShell> {
   late Map<String, dynamic> _activeMembership = widget.initialMembership;
   int _selectedIndex = 0;
+  String _presence = 'available';
   late final Future<List<Map<String, dynamic>>> _memberships = _loadMemberships();
+  late final Future<Map<String, dynamic>?> _profile = _loadProfile();
+
+  Future<Map<String, dynamic>?> _loadProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return null;
+    final row = await Supabase.instance.client
+        .from('user_profiles')
+        .select('full_name, avatar_url')
+        .eq('user_id', user.id)
+        .maybeSingle();
+    return row == null ? null : Map<String, dynamic>.from(row);
+  }
 
   Future<List<Map<String, dynamic>>> _loadMemberships() async {
     final rows = await Supabase.instance.client
@@ -1675,29 +1688,16 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
               );
             },
           ),
-          PopupMenuButton<String>(
-            tooltip: 'Cuenta',
-            onSelected: (value) {
-              if (value == 'logout') {
-                Supabase.instance.client.auth.signOut();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                enabled: false,
-                child: Text(
-                  Supabase.instance.client.auth.currentUser?.email ?? '',
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'logout',
-                child: Text('Cerrar sesión'),
-              ),
-            ],
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Icon(Icons.account_circle_outlined),
+          FutureBuilder<Map<String, dynamic>?>(
+            future: _profile,
+            builder: (context, snapshot) => _UserPresenceMenu(
+              profile: snapshot.data,
+              role: _role,
+              presence: _presence,
+              onPresenceChanged: (presence) {
+                setState(() => _presence = presence);
+              },
+              onLogout: () => Supabase.instance.client.auth.signOut(),
             ),
           ),
         ],
@@ -1872,6 +1872,133 @@ class _TenantModuleContent extends StatelessWidget {
   }
 }
 
+class _UserPresenceMenu extends StatelessWidget {
+  const _UserPresenceMenu({
+    required this.profile,
+    required this.role,
+    required this.presence,
+    required this.onPresenceChanged,
+    required this.onLogout,
+  });
+
+  final Map<String, dynamic>? profile;
+  final String role;
+  final String presence;
+  final ValueChanged<String> onPresenceChanged;
+  final VoidCallback onLogout;
+
+  static const _presenceLabels = {
+    'available': 'Disponible',
+    'away': 'Ausente',
+    'busy': 'Ocupado',
+  };
+
+  static const _presenceColors = {
+    'available': Colors.green,
+    'away': Colors.orange,
+    'busy': Colors.red,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+    final name = (profile?['full_name'] as String?)?.trim().isNotEmpty == true
+        ? profile!['full_name'] as String
+        : user?.email?.split('@').first ?? 'Usuario';
+    final avatarUrl = profile?['avatar_url'] as String?;
+    final color = _presenceColors[presence] ?? Colors.green;
+    return PopupMenuButton<String>(
+      tooltip: 'Perfil y estado',
+      onSelected: (value) {
+        if (value == 'logout') {
+          onLogout();
+        } else if (_presenceLabels.containsKey(value)) {
+          onPresenceChanged(value);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        const PopupMenuDivider(),
+        ..._presenceLabels.entries.map(
+          (entry) => CheckedPopupMenuItem(
+            value: entry.key,
+            checked: entry.key == presence,
+            child: Row(
+              children: [
+                _PresenceDot(color: _presenceColors[entry.key]!),
+                const SizedBox(width: 8),
+                Text(entry.value),
+              ],
+            ),
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'logout',
+          child: Text('Cerrar sesión'),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundImage:
+                  avatarUrl == null ? null : NetworkImage(avatarUrl),
+              child: avatarUrl == null
+                  ? Text(name.substring(0, 1).toUpperCase())
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 150),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name, overflow: TextOverflow.ellipsis),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _PresenceDot(color: color),
+                      const SizedBox(width: 4),
+                      Text(
+                        _presenceLabels[presence] ?? 'Disponible',
+                        style: TextStyle(fontSize: 12, color: color),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.keyboard_arrow_down),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PresenceDot extends StatelessWidget {
+  const _PresenceDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
 class _IpsDashboard extends StatelessWidget {
   const _IpsDashboard();
 
@@ -1880,8 +2007,6 @@ class _IpsDashboard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _IpsStatusBanner(),
-        const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth > 1100
@@ -1950,8 +2075,6 @@ class _IpsAgentDashboard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _IpsStatusBanner(),
-        const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth > 700
@@ -1964,16 +2087,16 @@ class _IpsAgentDashboard extends StatelessWidget {
                 _IpsMetricCard(
                   width: width,
                   title: 'Mis chats pendientes',
-                  value: '0',
-                  change: 'Sin conversaciones asignadas',
+                  value: '--',
+                  change: 'Disponible cuando conectemos WhatsApp',
                   icon: Icons.chat_outlined,
                   color: Colors.blue,
                 ),
                 _IpsMetricCard(
                   width: width,
                   title: 'Citas de hoy',
-                  value: '0',
-                  change: 'Agenda del día',
+                  value: '--',
+                  change: 'Disponible cuando configuremos agenda',
                   icon: Icons.calendar_month,
                   color: Colors.deepPurple,
                 ),
@@ -1988,8 +2111,8 @@ class _IpsAgentDashboard extends StatelessWidget {
                 _IpsMetricCard(
                   width: width,
                   title: 'Atención humana',
-                  value: 'Activa',
-                  change: 'Tienes acceso a soporte',
+                  value: '--',
+                  change: 'Disponible cuando configuremos atención',
                   icon: Icons.person_outline,
                   color: Colors.green,
                 ),
@@ -1998,29 +2121,6 @@ class _IpsAgentDashboard extends StatelessWidget {
           },
         ),
       ],
-    );
-  }
-}
-
-class _IpsStatusBanner extends StatelessWidget {
-  const _IpsStatusBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: const Icon(Icons.check_circle, color: Colors.green),
-        title: const Text('Estado del sistema'),
-        subtitle: const Text('Todos los sistemas operativos'),
-        trailing: Container(
-          width: 10,
-          height: 10,
-          decoration: const BoxDecoration(
-            color: Colors.green,
-            shape: BoxShape.circle,
-          ),
-        ),
-      ),
     );
   }
 }
