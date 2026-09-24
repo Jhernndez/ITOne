@@ -1624,7 +1624,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   List<_TenantModule> get _modules => [
         const _TenantModule('Dashboard', Icons.dashboard_outlined),
         const _TenantModule('Clientes', Icons.people_outline),
-        const _TenantModule('Conversaciones', Icons.forum_outlined),
+        const _TenantModule('WhatsApp Business', Icons.chat_outlined),
         const _TenantModule('Tickets', Icons.confirmation_number_outlined),
         const _TenantModule('Agenda', Icons.calendar_month_outlined),
         if (_role != 'operator')
@@ -1779,6 +1779,7 @@ class _TenantModuleContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDashboard = module.label == 'Dashboard';
+    final isWhatsApp = module.label == 'WhatsApp Business';
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
@@ -1812,9 +1813,9 @@ class _TenantModuleContent extends StatelessWidget {
                         icon: Icons.people_outline,
                       ),
                       _MetricCard(
-                        title: 'Conversaciones pendientes',
+                        title: 'Chats pendientes',
                         value: '0',
-                        icon: Icons.forum_outlined,
+                        icon: Icons.chat_outlined,
                       ),
                       _MetricCard(
                         title: 'Tickets abiertos',
@@ -1830,17 +1831,22 @@ class _TenantModuleContent extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                 ],
+                if (isWhatsApp) const _WhatsAppBusinessInbox(),
                 Card(
                   child: ListTile(
                     leading: Icon(module.icon),
                     title: Text(
                       isDashboard
                           ? 'Bienvenido al centro de operaciones'
+                          : isWhatsApp
+                              ? 'Bandeja de WhatsApp Business'
                           : 'Este módulo estará disponible próximamente',
                     ),
                     subtitle: Text(
                       isDashboard
                           ? 'Rol actual: ${_roleLabel(role)}. Usa el menú lateral para navegar.'
+                          : isWhatsApp
+                              ? 'Administra tus conversaciones y contactos desde un solo lugar.'
                           : 'La estructura de permisos ya está preparada para este módulo.',
                     ),
                   ),
@@ -1848,6 +1854,112 @@ class _TenantModuleContent extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WhatsAppBusinessInbox extends StatelessWidget {
+  const _WhatsAppBusinessInbox();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 24),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 480,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 320,
+              child: Column(
+                children: [
+                  Container(
+                    color: theme.colorScheme.primaryContainer,
+                    padding: const EdgeInsets.all(18),
+                    child: Row(
+                      children: [
+                        Icon(Icons.chat_outlined,
+                            color: theme.colorScheme.onPrimaryContainer),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Bandeja de entrada',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Buscar conversación',
+                          onPressed: null,
+                          icon: const Icon(Icons.search),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: TextField(
+                      enabled: false,
+                      decoration: InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Buscar chats',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'Aún no hay conversaciones.\nLos nuevos mensajes aparecerán aquí.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.forum_outlined,
+                        size: 64,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Selecciona una conversación',
+                        style: theme.textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Aquí podrás leer y responder los mensajes de tus clientes.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
