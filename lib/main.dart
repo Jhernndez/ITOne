@@ -31,7 +31,10 @@ class IToneApp extends StatelessWidget {
     return MaterialApp(
       title: 'ITONE',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B87)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF5F6870),
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
       ),
       home: configurationError
@@ -1711,8 +1714,11 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
                 accountEmail: Text(
                   '${_roleLabel(_role)} · ${tenant['slug']}',
                 ),
-                currentAccountPicture: CircleAvatar(
-                  child: Text((tenant['name'] as String).substring(0, 1)),
+                decoration: BoxDecoration(
+                  color: Colors.blueGrey.shade100,
+                ),
+                currentAccountPicture: _TenantLogoAvatar(
+                  tenant: tenant,
                 ),
               ),
               Expanded(
@@ -2231,6 +2237,27 @@ class _TenantBrand extends StatelessWidget {
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => Text(tenant['name'] as String),
           );
+  }
+}
+
+class _TenantLogoAvatar extends StatelessWidget {
+  const _TenantLogoAvatar({required this.tenant});
+
+  final Map<String, dynamic> tenant;
+
+  @override
+  Widget build(BuildContext context) {
+    final logoUrl = tenant['logo_url'] as String?;
+    return CircleAvatar(
+      backgroundColor: Colors.white,
+      backgroundImage: logoUrl == null ? null : NetworkImage(logoUrl),
+      child: logoUrl == null
+          ? Text(
+              (tenant['name'] as String).substring(0, 1).toUpperCase(),
+              style: TextStyle(color: Colors.blueGrey.shade700),
+            )
+          : null,
+    );
   }
 }
 
