@@ -1708,6 +1708,10 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
         ),
         title: Row(
           children: [
+            if (_sidebarCollapsed) ...[
+              _TenantBrand(tenant: tenant, height: 38),
+              const SizedBox(width: 16),
+            ],
             FutureBuilder<Map<String, dynamic>?>(
               future: _profile,
               builder: (context, snapshot) {
@@ -1726,7 +1730,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
                           ),
                     ),
                     Text(
-                      'Resumen de operaciones',
+                      tenant['name'] as String,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Colors.black54,
                           ),
@@ -1860,12 +1864,8 @@ class _TenantSidebar extends StatelessWidget {
                         onPressed: onToggle,
                         icon: const Icon(Icons.menu),
                       ),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: _TenantBrand(tenant: tenant, height: 42),
-                        ),
-                      ),
+                      const SizedBox(width: 4),
+                      _TenantBrand(tenant: tenant, height: 42),
                     ],
                   ),
           ),
