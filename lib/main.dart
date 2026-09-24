@@ -2543,6 +2543,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   late String _timezone =
       widget.tenant['timezone'] as String? ?? 'America/Bogota';
   int _settingsTab = 0;
+  bool _editingCompany = false;
 
   @override
   void initState() {
@@ -2688,7 +2689,9 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
           .update({'sector': _sector})
           .eq('id', widget.tenant['id']);
       widget.onSaved(_sector);
-      if (mounted) setState(() => _message = 'Sector guardado correctamente.');
+      if (mounted) {
+        setState(() => _message = 'Sector guardado correctamente.');
+      }
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
@@ -2830,8 +2833,16 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                                   message: _message,
                                   onSectorChanged: (value) =>
                                       setState(() => _sector = value),
-                                  onSave: _save,
+                                  onSave: () {
+                                    _save();
+                                    setState(() => _editingCompany = false);
+                                  },
                                   onPickLogo: _pickLogo,
+                                  editing: _editingCompany,
+                                  onEdit: () =>
+                                      setState(() => _editingCompany = true),
+                                  onCancel: () =>
+                                      setState(() => _editingCompany = false),
                                 ),
                               ],
                             )
@@ -3034,12 +3045,7 @@ class _WhatsAppSettings extends StatelessWidget {
             child: TabBarView(
               children: [
                 _WhatsAppIntegrationPanel(tenantId: tenantId),
-                _WhatsAppSettingPanel(
-                  icon: Icons.waving_hand_outlined,
-                  title: 'Mensaje de bienvenida',
-                  description: 'Define el mensaje inicial, el horario de atención y las opciones que verá el contacto al iniciar una conversación.',
-                  actionLabel: 'Crear mensaje de bienvenida',
-                ),
+                _WhatsAppWelcomeSettings(tenantId: tenantId),
                 _WhatsAppSettingPanel(
                   icon: Icons.account_tree_outlined,
                   title: 'Flujo de mensajes',
@@ -3085,6 +3091,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   bool _loading = true;
   bool _saving = false;
   bool _validating = false;
+  bool _editing = false;
   String _status = 'not_configured';
   String? _message;
 
@@ -3161,6 +3168,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         setState(() {
           _status = 'configuring';
           _message = 'Datos guardados. La conexión aún debe validarse desde el backend.';
+          _editing = false;
         });
       }
     } on PostgrestException catch (error) {
@@ -3206,6 +3214,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    final readOnly = !_editing;
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -3224,6 +3233,12 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
               ),
             ),
             Chip(label: Text(_integrationStatusLabel(_status))),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => setState(() => _editing = true),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -3234,20 +3249,24 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         _IntegrationField(
           controller: _businessIdController,
           label: 'WhatsApp Business Account ID',
+          readOnly: readOnly,
         ),
         _IntegrationField(
           controller: _phoneIdController,
           label: 'Phone Number ID',
+          readOnly: readOnly,
         ),
         _IntegrationField(
           controller: _phoneController,
           label: 'Número mostrado',
           required: false,
+          readOnly: readOnly,
         ),
         _IntegrationField(
           controller: _nameController,
           label: 'Nombre del canal',
           required: false,
+          readOnly: readOnly,
         ),
         const SizedBox(height: 8),
         Align(
@@ -3262,7 +3281,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         Align(
           alignment: Alignment.centerLeft,
           child: OutlinedButton.icon(
-            onPressed: _validating ? null : _validateConnection,
+            onPressed: _validating || readOnly ? null : _validateConnection,
             icon: const Icon(Icons.verified_outlined),
             label: Text(
               _validating ? 'Validando...' : 'Validar conexión con Meta',
@@ -3270,6 +3289,13 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ),
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
+        if (!readOnly) ...[
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: _saving ? null : () => setState(() => _editing = false),
+            child: const Text('Cancelar'),
+          ),
+        ],
       ],
     );
   }
@@ -3295,11 +3321,13 @@ class _IntegrationField extends StatelessWidget {
     required this.controller,
     required this.label,
     this.required = true,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
   final String label;
   final bool required;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -3307,12 +3335,165 @@ class _IntegrationField extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 14),
       child: TextField(
         controller: controller,
+        readOnly: readOnly,
         decoration: InputDecoration(
           labelText: label,
           suffixText: required ? '*' : null,
           border: const OutlineInputBorder(),
         ),
       ),
+    );
+  }
+}
+
+class _WhatsAppWelcomeSettings extends StatefulWidget {
+  const _WhatsAppWelcomeSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_WhatsAppWelcomeSettings> createState() =>
+      _WhatsAppWelcomeSettingsState();
+}
+
+class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
+  final _messageController = TextEditingController();
+  bool _enabled = false;
+  bool _loading = true;
+  bool _saving = false;
+  bool _editing = false;
+  String? _feedback;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_integrations')
+          .select('metadata')
+          .eq('tenant_id', widget.tenantId)
+          .eq('provider', 'whatsapp_welcome')
+          .maybeSingle();
+      final metadata = Map<String, dynamic>.from(
+        (row?['metadata'] as Map?) ?? const {},
+      );
+      _enabled = metadata['enabled'] as bool? ?? false;
+      _messageController.text = metadata['message'] as String? ?? '';
+    } on PostgrestException catch (error) {
+      _feedback = error.message;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_messageController.text.trim().isEmpty) {
+      setState(() => _feedback = 'Escribe el mensaje de bienvenida.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _feedback = null;
+    });
+    try {
+      await Supabase.instance.client.from('tenant_integrations').upsert({
+        'tenant_id': widget.tenantId,
+        'provider': 'whatsapp_welcome',
+        'status': _enabled ? 'active' : 'disabled',
+        'metadata': {
+          'enabled': _enabled,
+          'message': _messageController.text.trim(),
+        },
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'tenant_id,provider');
+      if (mounted) {
+        setState(() {
+          _editing = false;
+          _feedback = 'Mensaje de bienvenida guardado.';
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _feedback = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final readOnly = !_editing;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.waving_hand_outlined,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Mensaje de bienvenida',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => setState(() => _editing = true),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Configura el mensaje inicial que recibirá un contacto cuando escriba al canal.',
+        ),
+        const SizedBox(height: 20),
+        SwitchListTile(
+          value: _enabled,
+          onChanged: readOnly
+              ? null
+              : (value) => setState(() => _enabled = value),
+          title: const Text('Activar mensaje de bienvenida'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _messageController,
+          readOnly: readOnly,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            labelText: 'Mensaje',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _saving || readOnly ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(_saving ? 'Guardando...' : 'Guardar bienvenida'),
+        ),
+        if (!readOnly)
+          TextButton(
+            onPressed: _saving ? null : () => setState(() => _editing = false),
+            child: const Text('Cancelar'),
+          ),
+        if (_feedback != null) ...[
+          const SizedBox(height: 10),
+          Text(_feedback!),
+        ],
+      ],
     );
   }
 }
@@ -3460,6 +3641,9 @@ class _CompanySettings extends StatelessWidget {
     required this.onSectorChanged,
     required this.onSave,
     required this.onPickLogo,
+    required this.editing,
+    required this.onEdit,
+    required this.onCancel,
   });
 
   final Map<String, dynamic> tenant;
@@ -3470,6 +3654,9 @@ class _CompanySettings extends StatelessWidget {
   final ValueChanged<String> onSectorChanged;
   final VoidCallback onSave;
   final VoidCallback onPickLogo;
+  final bool editing;
+  final VoidCallback onEdit;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -3485,6 +3672,15 @@ class _CompanySettings extends StatelessWidget {
           'Estos datos definirán la experiencia operativa del tenant.',
         ),
         const SizedBox(height: 24),
+        if (!editing)
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
+          ),
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
@@ -3530,7 +3726,7 @@ class _CompanySettings extends StatelessWidget {
                     const Text('Se mostrará en la barra superior de ITONE.'),
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
-                      onPressed: uploadingLogo ? null : onPickLogo,
+                      onPressed: !editing || uploadingLogo ? null : onPickLogo,
                       icon: const Icon(Icons.upload_outlined),
                       label: Text(uploadingLogo ? 'Subiendo...' : 'Subir logo'),
                     ),
@@ -3564,7 +3760,7 @@ class _CompanySettings extends StatelessWidget {
                 ),
               )
               .toList(),
-          onChanged: saving
+          onChanged: !editing || saving
               ? null
               : (value) {
                   if (value != null) onSectorChanged(value);
@@ -3572,11 +3768,16 @@ class _CompanySettings extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: saving ? null : onSave,
+          onPressed: !editing || saving ? null : onSave,
           icon: const Icon(Icons.save_outlined),
           label: Text(saving ? 'Guardando...' : 'Guardar sector'),
         ),
         if (message != null) ...[const SizedBox(height: 12), Text(message!)],
+        if (editing)
+          TextButton(
+            onPressed: saving ? null : onCancel,
+            child: const Text('Cancelar'),
+          ),
       ],
     );
   }
