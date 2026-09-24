@@ -1353,6 +1353,36 @@ class _AuthPageState extends State<AuthPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  FutureBuilder<Map<String, dynamic>?>(
+                    future: Supabase.instance.client
+                        .from('user_profiles')
+                        .select('full_name')
+                        .eq(
+                          'user_id',
+                          Supabase.instance.client.auth.currentUser!.id,
+                        )
+                        .maybeSingle()
+                        .then(
+                          (row) => row == null
+                              ? null
+                              : Map<String, dynamic>.from(row),
+                        ),
+                    builder: (context, snapshot) {
+                      final email =
+                          Supabase.instance.client.auth.currentUser?.email ?? '';
+                      final name =
+                          snapshot.data?['full_name'] as String? ?? email.split('@').first;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      );
+                    },
+                  ),
                   Text(
                     'ITONE',
                     textAlign: TextAlign.center,
@@ -1610,6 +1640,7 @@ class TenantOperationsShell extends StatefulWidget {
 class _TenantOperationsShellState extends State<TenantOperationsShell> {
   late Map<String, dynamic> _activeMembership = widget.initialMembership;
   int _selectedIndex = 0;
+  bool _sidebarCollapsed = false;
   String _presence = 'available';
   late final Future<List<Map<String, dynamic>>> _memberships = _loadMemberships();
   late final Future<Map<String, dynamic>?> _profile = _loadProfile();
@@ -1726,6 +1757,10 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
             modules: modules,
             selectedIndex: _selectedIndex,
             role: _role,
+            collapsed: _sidebarCollapsed,
+            onToggle: () => setState(() {
+              _sidebarCollapsed = !_sidebarCollapsed;
+            }),
             onSelected: (index) => setState(() => _selectedIndex = index),
             onLogout: () => Supabase.instance.client.auth.signOut(),
           ),
@@ -1748,6 +1783,8 @@ class _TenantSidebar extends StatelessWidget {
     required this.modules,
     required this.selectedIndex,
     required this.role,
+    required this.collapsed,
+    required this.onToggle,
     required this.onSelected,
     required this.onLogout,
   });
@@ -1756,6 +1793,8 @@ class _TenantSidebar extends StatelessWidget {
   final List<_TenantModule> modules;
   final int selectedIndex;
   final String role;
+  final bool collapsed;
+  final VoidCallback onToggle;
   final ValueChanged<int> onSelected;
   final VoidCallback onLogout;
 
@@ -1763,7 +1802,7 @@ class _TenantSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
     return Container(
-      width: 248,
+      width: collapsed ? 76 : 248,
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(right: BorderSide(color: Color(0xFFE5E7EB))),
@@ -1771,17 +1810,20 @@ class _TenantSidebar extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 16, 20),
+            padding: EdgeInsets.fromLTRB(collapsed ? 12 : 20, 20, 12, 18),
             child: Row(
               children: [
-                _TenantLogoAvatar(tenant: tenant),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    tenant['name'] as String,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  child: _TenantBrand(tenant: tenant, centered: collapsed),
+                ),
+                IconButton(
+                  tooltip: collapsed ? 'Expandir menú' : 'Contraer menú',
+                  onPressed: onToggle,
+                  icon: Icon(
+                    collapsed
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left,
+                    size: 20,
                   ),
                 ),
               ],
@@ -1792,12 +1834,13 @@ class _TenantSidebar extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 18, 12, 12),
               children: [
-                _SidebarLabel(text: 'OPERACIONES'),
+                if (!collapsed) _SidebarLabel(text: 'OPERACIONES'),
                 for (var index = 0; index < modules.length; index++)
                   _SidebarItem(
                     module: modules[index],
                     selected: index == selectedIndex,
                     primary: primary,
+                    collapsed: collapsed,
                     onTap: () => onSelected(index),
                   ),
               ],
@@ -1807,12 +1850,14 @@ class _TenantSidebar extends StatelessWidget {
           ListTile(
             dense: true,
             leading: const Icon(Icons.logout_outlined, size: 20),
-            title: const Text('Cerrar sesión'),
+            title: collapsed ? null : const Text('Cerrar sesión'),
             onTap: onLogout,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-            child: Align(
+            child: collapsed
+                ? const SizedBox.shrink()
+                : Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 '${_roleLabel(role)} · ${tenant['slug']}',
@@ -1854,12 +1899,14 @@ class _SidebarItem extends StatelessWidget {
     required this.module,
     required this.selected,
     required this.primary,
+    required this.collapsed,
     required this.onTap,
   });
 
   final _TenantModule module;
   final bool selected;
   final Color primary;
+  final bool collapsed;
   final VoidCallback onTap;
 
   @override
@@ -1873,12 +1920,17 @@ class _SidebarItem extends StatelessWidget {
         selectedTileColor: primary.withValues(alpha: 0.1),
         selectedColor: primary,
         leading: Icon(module.icon, size: 21),
-        title: Text(
-          module.label,
-          style: TextStyle(
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-          ),
-        ),
+        title: collapsed
+            ? null
+            : Text(
+                module.label,
+                style: TextStyle(
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+        contentPadding: EdgeInsets.symmetric(horizontal: collapsed ? 16 : 12),
+        minLeadingWidth: collapsed ? 0 : null,
+        horizontalTitleGap: collapsed ? 0 : 8,
         onTap: onTap,
       ),
     );
@@ -2353,42 +2405,23 @@ const _tenantSectors = <String, String>{
 };
 
 class _TenantBrand extends StatelessWidget {
-  const _TenantBrand({required this.tenant});
+  const _TenantBrand({required this.tenant, this.centered = false});
 
   final Map<String, dynamic> tenant;
+  final bool centered;
 
   @override
   Widget build(BuildContext context) {
     final logoUrl = tenant['logo_url'] as String?;
-    return logoUrl == null
+    final brand = logoUrl == null
         ? Text(tenant['name'] as String)
         : Image.network(
             logoUrl,
-            height: 34,
+            height: centered ? 34 : 30,
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => Text(tenant['name'] as String),
           );
-  }
-}
-
-class _TenantLogoAvatar extends StatelessWidget {
-  const _TenantLogoAvatar({required this.tenant});
-
-  final Map<String, dynamic> tenant;
-
-  @override
-  Widget build(BuildContext context) {
-    final logoUrl = tenant['logo_url'] as String?;
-    return CircleAvatar(
-      backgroundColor: Colors.white,
-      backgroundImage: logoUrl == null ? null : NetworkImage(logoUrl),
-      child: logoUrl == null
-          ? Text(
-              (tenant['name'] as String).substring(0, 1).toUpperCase(),
-              style: TextStyle(color: Colors.blueGrey.shade700),
-            )
-          : null,
-    );
+    return centered ? Center(child: brand) : brand;
   }
 }
 
@@ -2566,7 +2599,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   Widget build(BuildContext context) {
     return Card(
       child: SizedBox(
-          height: 520,
+          height: 430,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
