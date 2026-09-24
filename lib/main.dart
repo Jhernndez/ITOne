@@ -345,12 +345,10 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   String? _tenantId;
   String _tenantRole = 'supervisor';
   List<Map<String, dynamic>> _tenants = [];
-  List<Map<String, dynamic>> _invitations = [];
   List<Map<String, dynamic>> _accessUsers = [];
   final Set<String> _selectedUserIds = {};
   Map<String, dynamic>? _selectedUser;
   bool _loading = true;
-  bool _sending = false;
   String? _error;
   String? _message;
 
@@ -371,18 +369,11 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
       final client = Supabase.instance.client;
       final tenants =
           await client.from('tenants').select('id, name, slug').order('name');
-      final invitations = await client
-          .from('platform_invitations')
-          .select(
-            'id, email, platform_role, tenant_id, tenant_role, status, expires_at',
-          )
-          .order('created_at', ascending: false);
       final accessUsers =
           await client.rpc('list_platform_access') as List<dynamic>;
       if (!mounted) return;
       setState(() {
         _tenants = List<Map<String, dynamic>>.from(tenants);
-        _invitations = List<Map<String, dynamic>>.from(invitations);
         _accessUsers = accessUsers
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
@@ -404,7 +395,6 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
       return;
     }
     setState(() {
-      _sending = true;
       _error = null;
       _message = null;
     });
@@ -428,31 +418,6 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     } catch (error) {
       if (mounted) {
         setState(() => _error = 'No fue posible enviar la invitación.\n$error');
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
-  }
-
-  Future<void> _revokeInvitation(String invitationId) async {
-    setState(() {
-      _error = null;
-      _message = null;
-    });
-    try {
-      await Supabase.instance.client.rpc(
-        'revoke_platform_invitation',
-        params: {'p_invitation_id': invitationId},
-      );
-      if (mounted) {
-        setState(() => _message = 'Invitación cancelada.');
-        await _loadData();
-      }
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = 'No fue posible cancelar la invitación.\n$error');
       }
     }
   }
@@ -550,14 +515,6 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
   }
 
-  String _tenantName(String? id) {
-    if (id == null) return 'Sin tenant específico';
-    for (final tenant in _tenants) {
-      if (tenant['id'] == id) return tenant['name'] as String;
-    }
-    return 'Tenant no disponible';
-  }
-
   void _selectUser(Map<String, dynamic> user, bool? selected) {
     final id = user['user_id'] as String;
     setState(() {
@@ -578,355 +535,386 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Invitaciones y accesos')),
-      body: SizedBox.expand(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Administración de usuarios',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Selecciona un usuario para administrar sus permisos y cuenta.',
-            ),
-            const SizedBox(height: 24),
-            LayoutBuilder(
-              builder: (context, constraints) => Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text('Invitar usuario',
-                                style: Theme.of(context).textTheme.titleLarge),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'El usuario recibirá un correo y obtendrá solo los accesos que definas.',
-                            ),
-                            const SizedBox(height: 20),
-                            ..._invitationFormFields(),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text('Usuarios y permisos',
-                style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (_accessUsers.isEmpty)
-              const Text('No hay usuarios con accesos asignados.')
-            else ...[
-              Card(
-                clipBehavior: Clip.antiAlias,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Seleccionar')),
-                      DataColumn(label: Text('Usuario')),
-                      DataColumn(label: Text('Correo')),
-                      DataColumn(label: Text('Plataforma')),
-                      DataColumn(label: Text('Tenant')),
-                      DataColumn(label: Text('Rol')),
-                    ],
-                    rows: _accessUsers.map((access) {
-                      final id = access['user_id'] as String;
-                      final selected = _selectedUserIds.contains(id);
-                      return DataRow(
-                        selected: selected,
-                        onSelectChanged: (value) => _selectUser(access, value),
-                        cells: [
-                          DataCell(Checkbox(
-                            value: selected,
-                            onChanged: (value) => _selectUser(access, value),
-                          )),
-                          DataCell(Text(id.substring(0, 8))),
-                          DataCell(Text(access['email'] as String? ?? '')),
-                          DataCell(Text(
-                              access['platform_role'] as String? ?? 'Sin acceso')),
-                          DataCell(Text(
-                              access['tenant_name'] as String? ?? 'Sin tenant')),
-                          DataCell(Text(access['tenant_role'] as String? ?? '')),
-                        ],
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-              if (_selectedUser != null) ...[
-                const SizedBox(height: 16),
-                _SelectedUserPanel(
-                  user: _selectedUser!,
-                  tenants: _tenants,
-                  onManagePermissions: () => showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: const Text('Administrar permisos'),
-                      content: SizedBox(
-                        width: 560,
-                        child: _AccessUserCard(
-                          access: _selectedUser!,
-                          tenants: _tenants,
-                          onSave: _updateAccess,
-                        ),
-                      ),
-                    ),
-                  ),
-                  onAction: (action, title, message) => _confirmUserAction(
-                    _selectedUser!, action, title, message,
-                  ),
+            Row(
+              children: [
+                Text('Usuarios activos',
+                    style: Theme.of(context).textTheme.headlineMedium),
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: () => _openUserPanel(),
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Añadir usuario'),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            const Text('Selecciona un usuario para administrar su cuenta y permisos.'),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: TextStyle(color: Colors.red)),
             ],
-            const SizedBox(height: 28),
-            Text('Invitaciones recientes',
-                style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (_invitations.isEmpty)
-              const Text('No hay invitaciones registradas.')
-            else
-              ..._invitations.map(
-                (invitation) {
-                  final isPending = invitation['status'] == 'pending';
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.mail_outline),
-                      title: Text(invitation['email'] as String),
-                      subtitle: Text(
-                        '${invitation['platform_role'] ?? 'Tenant only'} · ${_tenantName(invitation['tenant_id'] as String?)} · ${invitation['status']}',
+            if (_message != null) ...[
+              const SizedBox(height: 8),
+              Text(_message!, style: TextStyle(color: Colors.green)),
+            ],
+            const SizedBox(height: 20),
+            Expanded(
+              child: Card(
+                clipBehavior: Clip.antiAlias,
+                child: _accessUsers.isEmpty
+                    ? const Center(child: Text('No hay usuarios con accesos asignados.'))
+                    : SingleChildScrollView(
+                        child: DataTable(
+                          columns: const [
+                            DataColumn(label: Text('')),
+                            DataColumn(label: Text('Usuario')),
+                            DataColumn(label: Text('Correo')),
+                            DataColumn(label: Text('Acceso')),
+                            DataColumn(label: Text('Tenant')),
+                            DataColumn(label: Text('Rol')),
+                          ],
+                          rows: _accessUsers.map((user) {
+                            final id = user['user_id'] as String;
+                            return DataRow(
+                              onSelectChanged: (_) => _openUserPanel(user),
+                              cells: [
+                                DataCell(Checkbox(
+                                  value: _selectedUserIds.contains(id),
+                                  onChanged: (value) => _selectUser(user, value),
+                                )),
+                                DataCell(Text(id.substring(0, 8))),
+                                DataCell(Text(user['email'] as String? ?? '')),
+                                DataCell(Text(
+                                    user['platform_role'] as String? ?? 'Tenant')),
+                                DataCell(Text(user['tenant_name'] as String? ?? '')),
+                                DataCell(Text(user['tenant_role'] as String? ?? '')),
+                              ],
+                            );
+                          }).toList(),
+                        ),
                       ),
-                      trailing: isPending
-                          ? IconButton(
-                              tooltip: 'Cancelar invitación',
-                              icon: const Icon(Icons.cancel_outlined),
-                              onPressed: () => _confirmRevoke(
-                                invitation['id'] as String,
-                                invitation['email'] as String,
-                              ),
-                            )
-                          : null,
-                    ),
-                  );
-                },
               ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _invitationFormFields() => [
-        TextField(
-          controller: _emailController,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'Correo del invitado',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<String?>(
-          initialValue: _platformRole,
-          decoration: const InputDecoration(
-            labelText: 'Acceso de plataforma (opcional)',
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem<String?>(
-              value: null,
-              child: Text('Solo acceso al tenant seleccionado'),
-            ),
-            DropdownMenuItem(
-              value: 'platform_admin',
-              child: Text('Administrador de plataforma'),
-            ),
-            DropdownMenuItem(
-              value: 'platform_support',
-              child: Text('Soporte de plataforma'),
-            ),
-          ],
-          onChanged: (value) => setState(() => _platformRole = value),
-        ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<String?>(
-          initialValue: _tenantId,
-          decoration: const InputDecoration(
-            labelText: 'Tenant autorizado (opcional)',
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            const DropdownMenuItem<String?>(
-              value: null,
-              child: Text('Sin tenant específico'),
-            ),
-            ..._tenants.map(
-              (tenant) => DropdownMenuItem<String?>(
-                value: tenant['id'] as String,
-                child: Text(tenant['name'] as String),
-              ),
-            ),
-          ],
-          onChanged: (value) => setState(() => _tenantId = value),
-        ),
-        if (_tenantId != null) ...[
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: _tenantRole,
-            decoration: const InputDecoration(
-              labelText: 'Rol dentro del tenant',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 'tenant_admin',
-                child: Text('Administrador del tenant'),
-              ),
-              DropdownMenuItem(
-                value: 'supervisor',
-                child: Text('Supervisor'),
-              ),
-              DropdownMenuItem(
-                value: 'operator',
-                child: Text('Operador'),
-              ),
-            ],
-            onChanged: (value) => setState(() => _tenantRole = value!),
-          ),
-        ],
-        const SizedBox(height: 20),
-        if (_error != null)
-          Text(_error!, style: TextStyle(color: Colors.red[700])),
-        if (_message != null)
-          Text(_message!, style: TextStyle(color: Colors.green[700])),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _sending ? null : _sendInvitation,
-          icon: const Icon(Icons.send),
-          label: Text(_sending ? 'Enviando...' : 'Enviar invitación'),
-        ),
-      ];
-
-  Future<void> _confirmRevoke(String invitationId, String email) async {
-    final confirmed = await showDialog<bool>(
+  Future<void> _openUserPanel([Map<String, dynamic>? user]) async {
+    await showGeneralDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancelar invitación'),
-        content: Text(
-          '¿Deseas cancelar la invitación enviada a $email? '
-          'El enlace dejará de ser válido.',
+      barrierDismissible: true,
+      barrierLabel: 'Cerrar panel',
+      barrierColor: Colors.black54,
+      pageBuilder: (context, animation, secondaryAnimation) => Align(
+        alignment: Alignment.centerRight,
+        child: _UserSidePanel(
+          user: user,
+          tenants: _tenants,
+          onSavePermissions: _updateAccess,
+          onInvite: (email, platformRole, tenantId, tenantRole) async {
+            _emailController.text = email;
+            _platformRole = platformRole;
+            _tenantId = tenantId;
+            _tenantRole = tenantRole;
+            await _sendInvitation();
+          },
+          onAction: (action, title, message) => _confirmUserAction(
+            user ?? <String, dynamic>{},
+            action,
+            title,
+            message,
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Conservar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Cancelar invitación'),
-          ),
-        ],
       ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) =>
+          SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1, 0),
+          end: Offset.zero,
+        ).animate(animation),
+        child: child,
+      ),
+      transitionDuration: const Duration(milliseconds: 220),
     );
-    if (confirmed == true) {
-      await _revokeInvitation(invitationId);
-    }
   }
+
 }
 
-class _SelectedUserPanel extends StatelessWidget {
-  const _SelectedUserPanel({
+class _UserSidePanel extends StatefulWidget {
+  const _UserSidePanel({
     required this.user,
     required this.tenants,
-    required this.onManagePermissions,
+    required this.onSavePermissions,
+    required this.onInvite,
     required this.onAction,
   });
 
-  final Map<String, dynamic> user;
+  final Map<String, dynamic>? user;
   final List<Map<String, dynamic>> tenants;
-  final VoidCallback onManagePermissions;
-  final void Function(String action, String title, String message) onAction;
+  final Future<void> Function({
+    required String userId,
+    required String? platformRole,
+    required String? tenantId,
+    required String? tenantRole,
+    required String? currentTenantId,
+  }) onSavePermissions;
+  final Future<void> Function(
+    String email,
+    String? platformRole,
+    String? tenantId,
+    String tenantRole,
+  ) onInvite;
+  final Future<void> Function(
+    String action,
+    String title,
+    String message,
+  ) onAction;
+
+  @override
+  State<_UserSidePanel> createState() => _UserSidePanelState();
+}
+
+class _UserSidePanelState extends State<_UserSidePanel> {
+  int _tab = 0;
+  final _emailController = TextEditingController();
+  bool get _isNew => widget.user == null;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.user;
+    _emailController.text = user?['email'] as String? ?? '';
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final email = user['email'] as String? ?? 'Usuario';
-    final tenantName = user['tenant_name'] as String? ?? 'Sin tenant';
-    return Card(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(email, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 4),
-            Text('Tenant: $tenantName · Rol: ${user['tenant_role'] ?? 'Sin rol'}'),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: onManagePermissions,
-                  icon: const Icon(Icons.admin_panel_settings),
-                  label: const Text('Administrar permisos'),
+    final user = widget.user;
+    return Material(
+      elevation: 16,
+      color: Theme.of(context).colorScheme.surface,
+      child: SizedBox(
+        width: MediaQuery.sizeOf(context).width > 900 ? 560 : double.infinity,
+        height: double.infinity,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  tooltip: 'Cerrar',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () => onAction(
-                    'reset_password',
-                    'Restablecer contraseña',
-                    'Se enviará un enlace de restablecimiento al correo del usuario.',
-                  ),
-                  icon: const Icon(Icons.key),
-                  label: const Text('Restablecer clave'),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Text(
+                  _isNew
+                      ? 'Añadir usuario'
+                      : user?['email'] as String? ?? 'Usuario',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () => onAction(
-                    'disable',
-                    'Deshabilitar usuario',
-                    'El usuario no podrá iniciar sesión hasta que lo habilites nuevamente.',
+              ),
+              if (!_isNew) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 14, 28, 12),
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 8,
+                    children: [
+                      _PanelAction(
+                        icon: Icons.key,
+                        label: 'Restablecer contraseña',
+                        onTap: () => widget.onAction(
+                          'reset_password',
+                          'Restablecer contraseña',
+                          'Se enviará un enlace al correo del usuario.',
+                        ),
+                      ),
+                      _PanelAction(
+                        icon: Icons.block,
+                        label: 'Deshabilitar usuario',
+                        onTap: () => widget.onAction(
+                          'disable',
+                          'Deshabilitar usuario',
+                          'El usuario no podrá iniciar sesión.',
+                        ),
+                      ),
+                      _PanelAction(
+                        icon: Icons.delete_outline,
+                        label: 'Eliminar usuario',
+                        onTap: () => widget.onAction(
+                          'delete_user',
+                          'Eliminar usuario',
+                          'Esta acción elimina definitivamente la cuenta.',
+                        ),
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.block),
-                  label: const Text('Deshabilitar'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: user['tenant_id'] == null
-                      ? null
-                      : () => onAction(
-                            'remove_tenant',
-                            'Eliminar del tenant',
-                            'Se quitará el acceso de este usuario a $tenantName.',
-                          ),
-                  icon: const Icon(Icons.person_remove),
-                  label: const Text('Eliminar del tenant'),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.error,
-                  ),
-                  onPressed: () => onAction(
-                    'delete_user',
-                    'Eliminar usuario',
-                    'Esta acción elimina definitivamente la cuenta del usuario.',
-                  ),
-                  icon: const Icon(Icons.delete_forever),
-                  label: const Text('Eliminar usuario'),
                 ),
               ],
-            ),
-          ],
+              Row(
+                children: [
+                  _PanelTab(
+                    label: 'Detalles',
+                    selected: _tab == 0,
+                    onTap: () => setState(() => _tab = 0),
+                  ),
+                  _PanelTab(
+                    label: 'Permisos',
+                    selected: _tab == 1,
+                    onTap: () => setState(() => _tab = 1),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(28),
+                  children: [
+                    if (_tab == 0) _detailsTab(user) else _permissionsTab(user),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _detailsTab(Map<String, dynamic>? user) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Información del usuario',
+            style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 18),
+        TextField(
+          controller: _emailController,
+          readOnly: !_isNew,
+          decoration: const InputDecoration(
+            labelText: 'Correo electrónico',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        if (!_isNew) ...[
+          const SizedBox(height: 18),
+          _InfoLine(
+            label: 'Tenant actual',
+            value: user?['tenant_name'] as String? ?? 'Sin tenant',
+          ),
+          _InfoLine(
+            label: 'Rol actual',
+            value: user?['tenant_role'] as String? ?? 'Sin rol',
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _permissionsTab(Map<String, dynamic>? user) {
+    return _AccessUserCard(
+      access: user ?? <String, dynamic>{},
+      tenants: widget.tenants,
+      onSave: widget.onSavePermissions,
+      onInvite: widget.onInvite,
+      isNew: _isNew,
+    );
+  }
+}
+
+class _PanelAction extends StatelessWidget {
+  const _PanelAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
+            const SizedBox(width: 6),
+            Text(label),
+          ],
+        ),
+      );
+}
+
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Text(value),
+          ],
+        ),
+      );
+}
+
+class _PanelTab extends StatelessWidget {
+  const _PanelTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: selected
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+            ),
+            child: Text(label, textAlign: TextAlign.center),
+          ),
+        ),
+      );
 }
 
 class _AccessUserCard extends StatefulWidget {
@@ -934,6 +922,8 @@ class _AccessUserCard extends StatefulWidget {
     required this.access,
     required this.tenants,
     required this.onSave,
+    required this.onInvite,
+    required this.isNew,
   });
 
   final Map<String, dynamic> access;
@@ -945,16 +935,30 @@ class _AccessUserCard extends StatefulWidget {
     required String? tenantRole,
     required String? currentTenantId,
   }) onSave;
+  final Future<void> Function(
+    String email,
+    String? platformRole,
+    String? tenantId,
+    String tenantRole,
+  ) onInvite;
+  final bool isNew;
 
   @override
   State<_AccessUserCard> createState() => _AccessUserCardState();
 }
 
 class _AccessUserCardState extends State<_AccessUserCard> {
+  final _newEmailController = TextEditingController();
   late String? _platformRole = widget.access['platform_role'] as String?;
   late String? _tenantId = widget.access['tenant_id'] as String?;
   late String? _tenantRole = widget.access['tenant_role'] as String?;
   bool _saving = false;
+
+  @override
+  void dispose() {
+    _newEmailController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -965,7 +969,19 @@ class _AccessUserCardState extends State<_AccessUserCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(email, style: Theme.of(context).textTheme.titleMedium),
+            if (widget.isNew) ...[
+              TextField(
+                controller: _newEmailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Correo electrónico',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (!widget.isNew)
+              Text(email, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
               initialValue: _platformRole,
@@ -1046,14 +1062,23 @@ class _AccessUserCardState extends State<_AccessUserCard> {
                     ? null
                     : () async {
                         setState(() => _saving = true);
-                        await widget.onSave(
-                          userId: widget.access['user_id'] as String,
-                          platformRole: _platformRole,
-                          tenantId: _tenantId,
-                          tenantRole: _tenantRole,
-                          currentTenantId:
-                              widget.access['tenant_id'] as String?,
-                        );
+                        if (widget.isNew) {
+                          await widget.onInvite(
+                            _newEmailController.text.trim().toLowerCase(),
+                            _platformRole,
+                            _tenantId,
+                            _tenantRole ?? 'supervisor',
+                          );
+                        } else {
+                          await widget.onSave(
+                            userId: widget.access['user_id'] as String,
+                            platformRole: _platformRole,
+                            tenantId: _tenantId,
+                            tenantRole: _tenantRole,
+                            currentTenantId:
+                                widget.access['tenant_id'] as String?,
+                          );
+                        }
                         if (mounted) setState(() => _saving = false);
                       },
                 icon: const Icon(Icons.save),
