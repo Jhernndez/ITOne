@@ -1563,7 +1563,7 @@ class TenantWorkspacePage extends StatelessWidget {
   Future<Map<String, dynamic>> _tenant() async {
     return await Supabase.instance.client
         .from('tenants')
-        .select('id, name, slug, sector, created_at')
+        .select('id, name, slug, sector, logo_url, created_at')
         .eq('id', membership['tenant_id'])
         .single();
   }
@@ -1625,7 +1625,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   Future<List<Map<String, dynamic>>> _loadMemberships() async {
     final rows = await Supabase.instance.client
         .from('tenant_memberships')
-        .select('tenant_id, role, tenants(id, name, slug, sector)')
+        .select('tenant_id, role, tenants(id, name, slug, sector, logo_url)')
         .eq('user_id', Supabase.instance.client.auth.currentUser!.id);
     final memberships =
         List<Map<String, dynamic>>.from(rows.map((row) => Map<String, dynamic>.from(row)));
@@ -1662,7 +1662,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     final modules = _modules;
     return Scaffold(
       appBar: AppBar(
-        title: Text(tenant['name'] as String),
+        title: _TenantBrand(tenant: tenant),
         actions: [
           FutureBuilder<List<Map<String, dynamic>>>(
             future: _memberships,
@@ -1843,8 +1843,14 @@ class _TenantModuleContent extends StatelessWidget {
                     onSaved: (sector) {
                       tenant['sector'] = sector;
                     },
+                    onLogoSaved: (logoUrl) {
+                      tenant['logo_url'] = logoUrl;
+                    },
                   ),
-                Card(
+                if (!isDashboard &&
+                    !isWhatsApp &&
+                    module.label != 'Configuración')
+                  Card(
                   child: ListTile(
                     leading: Icon(module.icon),
                     title: Text(
@@ -2209,11 +2215,35 @@ const _tenantSectors = <String, String>{
   'nonprofit': 'Fundación / ONG',
 };
 
+class _TenantBrand extends StatelessWidget {
+  const _TenantBrand({required this.tenant});
+
+  final Map<String, dynamic> tenant;
+
+  @override
+  Widget build(BuildContext context) {
+    final logoUrl = tenant['logo_url'] as String?;
+    return logoUrl == null
+        ? Text(tenant['name'] as String)
+        : Image.network(
+            logoUrl,
+            height: 34,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => Text(tenant['name'] as String),
+          );
+  }
+}
+
 class _TenantConfiguration extends StatefulWidget {
-  const _TenantConfiguration({required this.tenant, required this.onSaved});
+  const _TenantConfiguration({
+    required this.tenant,
+    required this.onSaved,
+    required this.onLogoSaved,
+  });
 
   final Map<String, dynamic> tenant;
   final ValueChanged<String> onSaved;
+  final ValueChanged<String> onLogoSaved;
 
   @override
   State<_TenantConfiguration> createState() => _TenantConfigurationState();
@@ -2226,6 +2256,8 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
       : 'general';
   bool _saving = false;
   bool _uploading = false;
+  bool _uploadingLogo = false;
+  String? _avatarUrl;
   String? _message;
 
   @override
@@ -2245,11 +2277,12 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
     if (user == null) return;
     final row = await Supabase.instance.client
         .from('user_profiles')
-        .select('full_name')
+        .select('full_name, avatar_url')
         .eq('user_id', user.id)
         .maybeSingle();
     if (mounted && row != null) {
       _nameController.text = row['full_name'] as String? ?? '';
+      _avatarUrl = row['avatar_url'] as String?;
       setState(() {});
     }
   }
@@ -2293,11 +2326,17 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
         'avatar_url': url,
         'updated_at': DateTime.now().toIso8601String(),
       });
-      if (mounted) setState(() => _message = 'Foto actualizada.');
+      if (mounted) {
+        setState(() {
+          _avatarUrl = '$url?updated=${DateTime.now().millisecondsSinceEpoch}';
+          _message = 'Foto actualizada.';
+        });
+      }
     } on StorageException catch (error) {
       if (mounted) {
         setState(() => _message = 'Error de almacenamiento: ${error.message}');
       }
+
     } on PostgrestException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
@@ -2307,6 +2346,40 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _pickLogo() async {
+    final tenantId = widget.tenant['id'] as String;
+    final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (file == null) return;
+    setState(() => _uploadingLogo = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final extension = file.name.split('.').last.toLowerCase();
+      final path = '$tenantId/logo.$extension';
+      await Supabase.instance.client.storage.from('tenant-logos').uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(upsert: true),
+          );
+      final url = Supabase.instance.client.storage
+          .from('tenant-logos')
+          .getPublicUrl(path);
+      await Supabase.instance.client
+          .from('tenants')
+          .update({'logo_url': url})
+          .eq('id', tenantId);
+      widget.onLogoSaved('$url?updated=${DateTime.now().millisecondsSinceEpoch}');
+      if (mounted) setState(() => _message = 'Logo actualizado.');
+    } on StorageException catch (error) {
+      if (mounted) setState(() => _message = 'Error de almacenamiento: ${error.message}');
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } catch (_) {
+      if (mounted) setState(() => _message = 'No fue posible subir el logo.');
+    } finally {
+      if (mounted) setState(() => _uploadingLogo = false);
     }
   }
 
@@ -2374,6 +2447,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                           children: [
                             _PersonalSettings(
                               nameController: _nameController,
+                              avatarUrl: _avatarUrl,
                               saving: _saving,
                               uploading: _uploading,
                               message: _message,
@@ -2384,10 +2458,12 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                               tenant: widget.tenant,
                               sector: _sector,
                               saving: _saving,
+                              uploadingLogo: _uploadingLogo,
                               message: _message,
                               onSectorChanged: (value) =>
                                   setState(() => _sector = value),
                               onSave: _save,
+                              onPickLogo: _pickLogo,
                             ),
                           ],
                         ),
@@ -2401,11 +2477,13 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
       ),
     );
   }
+
 }
 
 class _PersonalSettings extends StatelessWidget {
   const _PersonalSettings({
     required this.nameController,
+    required this.avatarUrl,
     required this.saving,
     required this.uploading,
     required this.message,
@@ -2414,6 +2492,7 @@ class _PersonalSettings extends StatelessWidget {
   });
 
   final TextEditingController nameController;
+  final String? avatarUrl;
   final bool saving;
   final bool uploading;
   final String? message;
@@ -2436,7 +2515,11 @@ class _PersonalSettings extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 42,
-                child: Text(
+                backgroundImage:
+                    avatarUrl == null ? null : NetworkImage(avatarUrl!),
+                child: avatarUrl != null
+                    ? null
+                    : Text(
                   (nameController.text.isEmpty
                           ? user?.email ?? 'U'
                           : nameController.text)
@@ -2491,17 +2574,21 @@ class _CompanySettings extends StatelessWidget {
     required this.tenant,
     required this.sector,
     required this.saving,
+    required this.uploadingLogo,
     required this.message,
     required this.onSectorChanged,
     required this.onSave,
+    required this.onPickLogo,
   });
 
   final Map<String, dynamic> tenant;
   final String sector;
   final bool saving;
+  final bool uploadingLogo;
   final String? message;
   final ValueChanged<String> onSectorChanged;
   final VoidCallback onSave;
+  final VoidCallback onPickLogo;
 
   @override
   Widget build(BuildContext context) {
@@ -2513,6 +2600,58 @@ class _CompanySettings extends StatelessWidget {
         const SizedBox(height: 8),
         const Text('Estos datos definirán la experiencia operativa del tenant.'),
         const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: (tenant['logo_url'] as String?) == null
+                    ? Icon(Icons.business_outlined,
+                        size: 34,
+                        color: Theme.of(context).colorScheme.primary)
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.network(
+                          tenant['logo_url'] as String,
+                          fit: BoxFit.contain,
+                          width: 76,
+                          height: 76,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Logo de la empresa',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    const Text('Se mostrará en la barra superior de ITONE.'),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: uploadingLogo ? null : onPickLogo,
+                      icon: const Icon(Icons.upload_outlined),
+                      label: Text(uploadingLogo ? 'Subiendo...' : 'Subir logo'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
         TextFormField(
           initialValue: tenant['name'] as String? ?? '',
           readOnly: true,
