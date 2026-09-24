@@ -1697,16 +1697,45 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: _sidebarCollapsed ? 'Expandir menú' : 'Contraer menú',
+          onPressed: () => setState(() {
+            _sidebarCollapsed = !_sidebarCollapsed;
+          }),
+          icon: const Icon(Icons.menu),
+        ),
         title: Row(
           children: [
-            _TenantBrand(tenant: tenant),
-            const SizedBox(width: 28),
-            Text(
-              'Resumen de operaciones',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.black54,
-                    fontWeight: FontWeight.w500,
-                  ),
+            if (!_sidebarCollapsed) ...[
+              _TenantBrand(tenant: tenant, height: 44),
+              const SizedBox(width: 28),
+            ],
+            FutureBuilder<Map<String, dynamic>?>(
+              future: _profile,
+              builder: (context, snapshot) {
+                final email =
+                    Supabase.instance.client.auth.currentUser?.email ?? '';
+                final name = snapshot.data?['full_name'] as String? ??
+                    email.split('@').first;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    Text(
+                      'Resumen de operaciones',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.black54,
+                          ),
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -1758,9 +1787,6 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
             selectedIndex: _selectedIndex,
             role: _role,
             collapsed: _sidebarCollapsed,
-            onToggle: () => setState(() {
-              _sidebarCollapsed = !_sidebarCollapsed;
-            }),
             onSelected: (index) => setState(() => _selectedIndex = index),
             onLogout: () => Supabase.instance.client.auth.signOut(),
           ),
@@ -1784,7 +1810,6 @@ class _TenantSidebar extends StatelessWidget {
     required this.selectedIndex,
     required this.role,
     required this.collapsed,
-    required this.onToggle,
     required this.onSelected,
     required this.onLogout,
   });
@@ -1794,7 +1819,6 @@ class _TenantSidebar extends StatelessWidget {
   final int selectedIndex;
   final String role;
   final bool collapsed;
-  final VoidCallback onToggle;
   final ValueChanged<int> onSelected;
   final VoidCallback onLogout;
 
@@ -1813,19 +1837,14 @@ class _TenantSidebar extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(collapsed ? 12 : 20, 20, 12, 18),
             child: Row(
               children: [
-                Expanded(
-                  child: _TenantBrand(tenant: tenant, centered: collapsed),
-                ),
-                IconButton(
-                  tooltip: collapsed ? 'Expandir menú' : 'Contraer menú',
-                  onPressed: onToggle,
-                  icon: Icon(
-                    collapsed
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left,
-                    size: 20,
+                if (collapsed)
+                  Expanded(
+                    child: _TenantBrand(
+                      tenant: tenant,
+                      centered: true,
+                      height: 42,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -2405,10 +2424,15 @@ const _tenantSectors = <String, String>{
 };
 
 class _TenantBrand extends StatelessWidget {
-  const _TenantBrand({required this.tenant, this.centered = false});
+  const _TenantBrand({
+    required this.tenant,
+    this.centered = false,
+    this.height = 30,
+  });
 
   final Map<String, dynamic> tenant;
   final bool centered;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -2417,7 +2441,7 @@ class _TenantBrand extends StatelessWidget {
         ? Text(tenant['name'] as String)
         : Image.network(
             logoUrl,
-            height: centered ? 34 : 30,
+            height: height,
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => Text(tenant['name'] as String),
           );
