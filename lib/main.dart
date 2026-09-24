@@ -4861,12 +4861,19 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           .select('id, direction, message_type, body, created_at, provider_timestamp')
           .eq('tenant_id', widget.tenantId)
           .eq('conversation_id', conversationId)
-          .order('created_at');
+          .order('created_at', ascending: true);
       if (!mounted || conversationId != _selectedConversationId) return;
       setState(() {
         _messages = (rows as List)
             .map((row) => Map<String, dynamic>.from(row as Map))
             .toList();
+        _messages.sort((a, b) {
+          final aDate = DateTime.tryParse(a['created_at'] as String? ?? '') ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = DateTime.tryParse(b['created_at'] as String? ?? '') ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          return aDate.compareTo(bDate);
+        });
         _loadingMessages = false;
       });
     } on PostgrestException catch (error) {
@@ -4931,7 +4938,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           margin: const EdgeInsets.only(bottom: 24),
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
-            height: 650,
+            height: (MediaQuery.sizeOf(context).height - 250).clamp(460.0, 760.0),
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : Row(

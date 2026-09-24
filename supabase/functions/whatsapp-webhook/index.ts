@@ -47,6 +47,15 @@ Deno.serve(async (request) => {
         const value = change.value;
         const phoneNumberId = value?.metadata?.phone_number_id;
         if (typeof phoneNumberId !== "string") continue;
+        for (const status of value.statuses ?? []) {
+          console.log("WhatsApp message status received", {
+            phoneNumberId,
+            messageId: status.id,
+            status: status.status,
+            recipientId: status.recipient_id,
+            timestamp: status.timestamp,
+          });
+        }
 
         const { data: account, error: accountError } = await client
           .from("whatsapp_accounts")
