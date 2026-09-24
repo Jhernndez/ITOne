@@ -3661,6 +3661,7 @@ class _WhatsAppWelcomeSettings extends StatefulWidget {
 
 class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
   final _messageController = TextEditingController();
+  final _messagesScrollController = ScrollController();
   bool _enabled = false;
   bool _loading = true;
   bool _saving = false;
@@ -3676,6 +3677,7 @@ class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
   @override
   void dispose() {
     _messageController.dispose();
+    _messagesScrollController.dispose();
     super.dispose();
   }
 
@@ -4797,6 +4799,7 @@ class _WhatsAppBusinessInbox extends StatefulWidget {
 
 class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   final _messageController = TextEditingController();
+  final _messagesScrollController = ScrollController();
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _messages = [];
   String? _selectedConversationId;
@@ -4818,6 +4821,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   @override
   void dispose() {
     _messageController.dispose();
+    _messagesScrollController.dispose();
     final channel = _realtimeChannel;
     if (channel != null) {
       _client.removeChannel(channel);
@@ -4837,7 +4841,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
             column: 'tenant_id',
             value: widget.tenantId,
           ),
-          callback: (_) => _loadConversations(),
+          callback: (_) => _loadConversations(refreshMessages: false),
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
@@ -4849,14 +4853,17 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
             value: widget.tenantId,
           ),
           callback: (_) async {
-            await _loadConversations();
-            await _loadMessages();
+            await _loadConversations(refreshMessages: false);
+            await _loadMessages(showLoading: false);
           },
         )
         .subscribe();
   }
 
-  Future<void> _loadConversations({bool preserveSelection = true}) async {
+  Future<void> _loadConversations({
+    bool preserveSelection = true,
+    bool refreshMessages = true,
+  }) async {
     try {
       final rows = await _client
           .from('whatsapp_conversations')
@@ -4879,19 +4886,23 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
               : conversations.first['id'] as String;
         }
       });
-      if (_selectedConversationId != null) await _loadMessages();
+      if (_selectedConversationId != null) {
+        await _loadMessages(
+          showLoading: refreshMessages && _messages.isEmpty,
+        );
+      }
     } on PostgrestException catch (error) {
       if (mounted) setState(() { _loading = false; _error = error.message; });
     }
   }
 
-  Future<void> _loadMessages() async {
+  Future<void> _loadMessages({bool showLoading = true}) async {
     final conversationId = _selectedConversationId;
     if (conversationId == null) {
       if (mounted) setState(() => _messages = []);
       return;
     }
-    setState(() => _loadingMessages = true);
+    if (showLoading) setState(() => _loadingMessages = true);
     try {
       final rows = await _client
           .from('whatsapp_messages')
@@ -4915,9 +4926,22 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
         });
         _loadingMessages = false;
       });
+      _scrollMessagesToBottom();
     } on PostgrestException catch (error) {
       if (mounted) setState(() { _loadingMessages = false; _error = error.message; });
     }
+
+  }
+
+  void _scrollMessagesToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_messagesScrollController.hasClients) return;
+      _messagesScrollController.animateTo(
+        _messagesScrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   Future<void> _sendMessage() async {
@@ -4935,7 +4959,9 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
         },
       );
       _messageController.clear();
-      await _loadConversations();
+      await _loadConversations(refreshMessages: false);
+      await _loadMessages(showLoading: false);
+      _scrollMessagesToBottom();
     } on FunctionException catch (error) {
       if (mounted) setState(() => _error = error.details?.toString() ?? error.reasonPhrase);
     } finally {
@@ -5005,7 +5031,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           color: theme.colorScheme.primaryContainer,
           padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
           child: Row(children: [
-            Expanded(child: Text('Centro de conversaciones', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer))),
+            Expanded(child: Text('Conversaciones', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer))),
             IconButton(tooltip: 'Actualizar', onPressed: _loadConversations, icon: const Icon(Icons.refresh)),
           ]),
         ),
@@ -5055,10 +5081,10 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-          leading: CircleAvatar(backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase())),
-          title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(contact['phone_number'] as String? ?? 'WhatsApp'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+          leading: CircleAvatar(radius: 18, backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 13))),
+          title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          subtitle: Text(contact['phone_number'] as String? ?? 'WhatsApp', style: const TextStyle(fontSize: 12)),
           trailing: IconButton(tooltip: 'Actualizar mensajes', onPressed: _loadMessages, icon: const Icon(Icons.refresh)),
         ),
         const Divider(height: 1),
@@ -5066,12 +5092,13 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           child: Container(
             width: double.infinity,
             color: const Color(0xFFF8FAFC),
-            padding: const EdgeInsets.all(24),
-            child: _loadingMessages
+            padding: const EdgeInsets.all(14),
+            child: _loadingMessages && _messages.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
                     ? const Center(child: Text('No hay mensajes en esta conversación.'))
                     : ListView.builder(
+                        controller: _messagesScrollController,
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
@@ -5079,7 +5106,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                           return Align(
                             alignment: sent ? Alignment.centerRight : Alignment.centerLeft,
                             child: Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.only(bottom: 8),
                               child: Column(
                                 crossAxisAlignment: sent
                                     ? CrossAxisAlignment.end
@@ -5113,9 +5140,9 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(10),
           child: Row(children: [
-            Expanded(child: TextField(controller: _messageController, enabled: !_sending, onSubmitted: (_) => _sendMessage(), decoration: InputDecoration(hintText: 'Escribe un mensaje...', border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)), isDense: true))),
+            Expanded(child: TextField(controller: _messageController, enabled: !_sending, onSubmitted: (_) => _sendMessage(), style: const TextStyle(fontSize: 14), decoration: InputDecoration(hintText: 'Escribe un mensaje...', hintStyle: const TextStyle(fontSize: 14), border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)), isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11)))),
             const SizedBox(width: 10),
             IconButton.filled(tooltip: 'Enviar mensaje', onPressed: _sending ? null : _sendMessage, icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send)),
           ]),
