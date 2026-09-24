@@ -1664,8 +1664,21 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     final tenant = _activeMembership['tenants'] as Map<String, dynamic>;
     final modules = _modules;
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F6F8),
       appBar: AppBar(
-        title: _TenantBrand(tenant: tenant),
+        title: Row(
+          children: [
+            _TenantBrand(tenant: tenant),
+            const SizedBox(width: 28),
+            Text(
+              'Resumen de operaciones',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w500,
+                  ),
+            ),
+          ],
+        ),
         actions: [
           FutureBuilder<List<Map<String, dynamic>>>(
             future: _memberships,
@@ -1705,50 +1718,168 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
           ),
         ],
       ),
-      drawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            children: [
-              UserAccountsDrawerHeader(
-                accountName: Text(tenant['name'] as String),
-                accountEmail: Text(
-                  '${_roleLabel(_role)} · ${tenant['slug']}',
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.blueGrey.shade100,
-                ),
-                currentAccountPicture: _TenantLogoAvatar(
-                  tenant: tenant,
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: modules.length,
-                  itemBuilder: (context, index) => ListTile(
-                    leading: Icon(modules[index].icon),
-                    title: Text(modules[index].label),
-                    selected: index == _selectedIndex,
-                    onTap: () {
-                      setState(() => _selectedIndex = index);
-                      Navigator.pop(context);
-                    },
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _TenantSidebar(
+            tenant: tenant,
+            modules: modules,
+            selectedIndex: _selectedIndex,
+            role: _role,
+            onSelected: (index) => setState(() => _selectedIndex = index),
+            onLogout: () => Supabase.instance.client.auth.signOut(),
+          ),
+          Expanded(
+            child: _TenantModuleContent(
+              module: modules[_selectedIndex],
+              tenant: tenant,
+              role: _role,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TenantSidebar extends StatelessWidget {
+  const _TenantSidebar({
+    required this.tenant,
+    required this.modules,
+    required this.selectedIndex,
+    required this.role,
+    required this.onSelected,
+    required this.onLogout,
+  });
+
+  final Map<String, dynamic> tenant;
+  final List<_TenantModule> modules;
+  final int selectedIndex;
+  final String role;
+  final ValueChanged<int> onSelected;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      width: 248,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: Color(0xFFE5E7EB))),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 16, 20),
+            child: Row(
+              children: [
+                _TenantLogoAvatar(tenant: tenant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    tenant['name'] as String,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 18, 12, 12),
+              children: [
+                _SidebarLabel(text: 'OPERACIONES'),
+                for (var index = 0; index < modules.length; index++)
+                  _SidebarItem(
+                    module: modules[index],
+                    selected: index == selectedIndex,
+                    primary: primary,
+                    onTap: () => onSelected(index),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.logout_outlined, size: 20),
+            title: const Text('Cerrar sesión'),
+            onTap: onLogout,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${_roleLabel(role)} · ${tenant['slug']}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.black45,
+                    ),
               ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Cerrar sesión'),
-                onTap: () => Supabase.instance.client.auth.signOut(),
-              ),
-            ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarLabel extends StatelessWidget {
+  const _SidebarLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              letterSpacing: 1.1,
+              color: Colors.black45,
+              fontWeight: FontWeight.bold,
+            ),
+      ),
+    );
+  }
+}
+
+class _SidebarItem extends StatelessWidget {
+  const _SidebarItem({
+    required this.module,
+    required this.selected,
+    required this.primary,
+    required this.onTap,
+  });
+
+  final _TenantModule module;
+  final bool selected;
+  final Color primary;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: ListTile(
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        selected: selected,
+        selectedTileColor: primary.withValues(alpha: 0.1),
+        selectedColor: primary,
+        leading: Icon(module.icon, size: 21),
+        title: Text(
+          module.label,
+          style: TextStyle(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           ),
         ),
-      ),
-      body: _TenantModuleContent(
-        module: modules[_selectedIndex],
-        tenant: tenant,
-        role: _role,
+        onTap: onTap,
       ),
     );
   }
