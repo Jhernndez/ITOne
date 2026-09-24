@@ -3265,12 +3265,7 @@ class _WhatsAppSettings extends StatelessWidget {
                 _WhatsAppIntegrationPanel(tenantId: tenantId),
                 _WhatsAppWelcomeSettings(tenantId: tenantId),
                 _WhatsAppFlowSettings(tenantId: tenantId),
-                _WhatsAppSettingPanel(
-                  icon: Icons.timer_outlined,
-                  title: 'Acuerdos de nivel de servicio',
-                  description: 'Configura tiempos objetivo de primera respuesta, atención y escalamiento según la prioridad del contacto.',
-                  actionLabel: 'Configurar SLA',
-                ),
+                _WhatsAppSlaSettings(tenantId: tenantId),
                 _WhatsAppSettingPanel(
                   icon: Icons.auto_awesome_outlined,
                   title: 'Automatizaciones',
@@ -3799,6 +3794,377 @@ class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
           Text(_feedback!),
         ],
       ],
+    );
+  }
+}
+
+class _WhatsAppSlaSettings extends StatefulWidget {
+  const _WhatsAppSlaSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_WhatsAppSlaSettings> createState() => _WhatsAppSlaSettingsState();
+}
+
+class _WhatsAppSlaSettingsState extends State<_WhatsAppSlaSettings> {
+  final _firstResponseController = TextEditingController();
+  final _resolutionController = TextEditingController();
+  final _escalationController = TextEditingController();
+  bool _enabled = false;
+  bool _businessHoursOnly = true;
+  String _startTime = '08:00';
+  String _endTime = '17:00';
+  String _timezone = 'America/Bogota';
+  bool _loading = true;
+  bool _saving = false;
+  bool _editing = false;
+  String? _feedback;
+
+  @override
+  void initState() {
+    super.initState();
+    _firstResponseController.text = '15';
+    _resolutionController.text = '240';
+    _escalationController.text = '10';
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _firstResponseController.dispose();
+    _resolutionController.dispose();
+    _escalationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_integrations')
+          .select('metadata')
+          .eq('tenant_id', widget.tenantId)
+          .eq('provider', 'whatsapp_sla')
+          .maybeSingle();
+      final metadata = Map<String, dynamic>.from(
+        (row?['metadata'] as Map?) ?? const {},
+      );
+      _enabled = metadata['enabled'] as bool? ?? false;
+      _businessHoursOnly = metadata['business_hours_only'] as bool? ?? true;
+      _startTime = metadata['start_time'] as String? ?? '08:00';
+      _endTime = metadata['end_time'] as String? ?? '17:00';
+      _timezone = metadata['timezone'] as String? ?? 'America/Bogota';
+      _firstResponseController.text =
+          '${metadata['first_response_minutes'] ?? 15}';
+      _resolutionController.text = '${metadata['resolution_minutes'] ?? 240}';
+      _escalationController.text = '${metadata['escalation_minutes'] ?? 10}';
+    } on PostgrestException catch (error) {
+      _feedback = error.message;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  int? _minutes(TextEditingController controller) =>
+      int.tryParse(controller.text.trim());
+
+  Future<void> _save() async {
+    final firstResponse = _minutes(_firstResponseController);
+    final resolution = _minutes(_resolutionController);
+    final escalation = _minutes(_escalationController);
+    if (firstResponse == null || firstResponse < 1) {
+      setState(() => _feedback = 'La primera respuesta debe ser mayor que cero.');
+      return;
+    }
+    if (resolution == null || resolution < firstResponse) {
+      setState(() => _feedback =
+          'La resolución debe ser mayor o igual al tiempo de primera respuesta.');
+      return;
+    }
+    if (escalation == null || escalation < 1) {
+      setState(() => _feedback = 'El escalamiento debe ser mayor que cero.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _feedback = null;
+    });
+    try {
+      await Supabase.instance.client.from('tenant_integrations').upsert({
+        'tenant_id': widget.tenantId,
+        'provider': 'whatsapp_sla',
+        'status': _enabled ? 'active' : 'disabled',
+        'metadata': {
+          'enabled': _enabled,
+          'business_hours_only': _businessHoursOnly,
+          'start_time': _startTime,
+          'end_time': _endTime,
+          'timezone': _timezone,
+          'first_response_minutes': firstResponse,
+          'resolution_minutes': resolution,
+          'escalation_minutes': escalation,
+        },
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'tenant_id,provider');
+      if (mounted) {
+        setState(() {
+          _editing = false;
+          _feedback = 'Configuración SLA guardada.';
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _feedback = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String _timeLabel(String value) {
+    final parts = value.split(':');
+    final hour = int.tryParse(parts.first) ?? 0;
+    final minute = parts.length > 1 ? parts[1] : '00';
+    final suffix = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+    return '$displayHour:$minute $suffix';
+  }
+
+  Future<void> _pickTime({required bool start}) async {
+    final current = (start ? _startTime : _endTime).split(':');
+    final initial = TimeOfDay(
+      hour: int.tryParse(current.first) ?? 8,
+      minute: int.tryParse(current[1]) ?? 0,
+    );
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+    if (selected == null) return;
+    final value =
+        '${selected.hour.toString().padLeft(2, '0')}:${selected.minute.toString().padLeft(2, '0')}';
+    setState(() {
+      if (start) {
+        _startTime = value;
+      } else {
+        _endTime = value;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final readOnly = !_editing;
+    final theme = Theme.of(context);
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.timer_outlined, color: theme.colorScheme.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Acuerdos de nivel de servicio',
+                style: theme.textTheme.titleLarge,
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => setState(() => _editing = true),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Define los tiempos de atención y las condiciones para escalar conversaciones.',
+        ),
+        const SizedBox(height: 20),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _enabled,
+                  onChanged: readOnly
+                      ? null
+                      : (value) => setState(() => _enabled = value),
+                  title: const Text('Activar SLA para WhatsApp'),
+                  subtitle: Text(_enabled ? 'Activo' : 'Desactivado'),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _businessHoursOnly,
+                  onChanged: readOnly
+                      ? null
+                      : (value) =>
+                          setState(() => _businessHoursOnly = value),
+                  title: const Text('Contar únicamente dentro del horario laboral'),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: _timezone,
+                  decoration: const InputDecoration(
+                    labelText: 'Zona horaria',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'America/Bogota',
+                      child: Text('America/Bogota (UTC-05:00)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'America/Mexico_City',
+                      child: Text('America/Mexico_City (UTC-06:00)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'America/New_York',
+                      child: Text('America/New_York'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'UTC',
+                      child: Text('UTC'),
+                    ),
+                  ],
+                  onChanged: readOnly
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _timezone = value);
+                        },
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SlaTimeField(
+                        label: 'Inicio de atención',
+                        value: _timeLabel(_startTime),
+                        enabled: !readOnly,
+                        onTap: () => _pickTime(start: true),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _SlaTimeField(
+                        label: 'Fin de atención',
+                        value: _timeLabel(_endTime),
+                        enabled: !readOnly,
+                        onTap: () => _pickTime(start: false),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                Text(
+                  'Tiempos objetivo (minutos)',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SlaNumberField(
+                  controller: _firstResponseController,
+                  label: 'Primera respuesta',
+                  readOnly: readOnly,
+                ),
+                const SizedBox(height: 12),
+                _SlaNumberField(
+                  controller: _resolutionController,
+                  label: 'Resolución máxima',
+                  readOnly: readOnly,
+                ),
+                const SizedBox(height: 12),
+                _SlaNumberField(
+                  controller: _escalationController,
+                  label: 'Escalar al supervisor después de',
+                  readOnly: readOnly,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _saving || readOnly ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(_saving ? 'Guardando...' : 'Guardar configuración SLA'),
+        ),
+        if (!readOnly)
+          TextButton(
+            onPressed: _saving ? null : () => setState(() => _editing = false),
+            child: const Text('Cancelar'),
+          ),
+        if (_feedback != null) ...[
+          const SizedBox(height: 10),
+          Text(_feedback!),
+        ],
+      ],
+    );
+  }
+}
+
+class _SlaTimeField extends StatelessWidget {
+  const _SlaTimeField({
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.schedule),
+        ),
+        child: Text(value),
+      ),
+    );
+  }
+}
+
+class _SlaNumberField extends StatelessWidget {
+  const _SlaNumberField({
+    required this.controller,
+    required this.label,
+    required this.readOnly,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool readOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      readOnly: readOnly,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(
+        labelText: label,
+        suffixText: 'min',
+        border: const OutlineInputBorder(),
+      ),
     );
   }
 }
