@@ -10,6 +10,11 @@ const _supabasePublishableKey = String.fromEnvironment(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  if (_isPrivacyPolicyRoute()) {
+    runApp(const IToneApp(publicPage: PrivacyPolicyPage()));
+    return;
+  }
+
   if (_supabaseUrl.isEmpty || _supabasePublishableKey.isEmpty) {
     runApp(const IToneApp(configurationError: true));
     return;
@@ -23,9 +28,14 @@ Future<void> main() async {
 }
 
 class IToneApp extends StatelessWidget {
-  const IToneApp({super.key, this.configurationError = false});
+  const IToneApp({
+    super.key,
+    this.configurationError = false,
+    this.publicPage,
+  });
 
   final bool configurationError;
+  final Widget? publicPage;
 
   @override
   Widget build(BuildContext context) {
@@ -38,9 +48,220 @@ class IToneApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: configurationError
+      home: publicPage ??
+          (configurationError
           ? const ConfigurationErrorPage()
-          : const AuthGate(),
+          : const AuthGate()),
+    );
+  }
+}
+
+bool _isPrivacyPolicyRoute() {
+  final path = Uri.base.path.replaceFirst(RegExp(r'/$'), '');
+  return path == '/privacy' || path == '/privacy-policy';
+}
+
+class PrivacyPolicyPage extends StatelessWidget {
+  const PrivacyPolicyPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FA),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        titleSpacing: 24,
+        title: Row(
+          children: [
+            Image.network(
+              '/icons/Icon-512.png',
+              width: 38,
+              height: 38,
+              errorBuilder: (_, _, _) =>
+                  const Icon(Icons.business, color: Color(0xFF1264D8)),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'ITONE',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: Card(
+              elevation: 0,
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: DefaultTextStyle(
+                  style: const TextStyle(
+                    color: Color(0xFF263238),
+                    fontSize: 16,
+                    height: 1.55,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Política de privacidad',
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Última actualización: 24 de septiembre de 2026',
+                        style: TextStyle(color: Color(0xFF607D8B)),
+                      ),
+                      const SizedBox(height: 28),
+                      const _PrivacySection(
+                        title: '1. Responsable del tratamiento',
+                        children: [
+                          Text(
+                            'IT DATA SAS, responsable de la plataforma ITONE, '
+                            'administra y protege los datos tratados a través '
+                            'de este servicio. Para consultas sobre privacidad '
+                            'o solicitudes de los titulares, utiliza los canales '
+                            'de contacto oficiales de IT DATA SAS.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '2. Alcance de ITONE',
+                        children: [
+                          Text(
+                            'ITONE es una plataforma SaaS empresarial para '
+                            'gestionar operaciones, clientes, comunicaciones, '
+                            'tickets, automatizaciones e integraciones externas. '
+                            'Cada empresa usuaria administra su propio espacio '
+                            'empresarial y es responsable de definir los datos '
+                            'que incorpora y las instrucciones de tratamiento.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '3. Información que podemos tratar',
+                        children: [
+                          Text(
+                            'Según los módulos y servicios activados, podemos '
+                            'tratar datos de cuenta y contacto, información de '
+                            'la empresa, perfiles y permisos de usuarios, '
+                            'registros de auditoría, conversaciones y mensajes '
+                            'de WhatsApp, archivos cargados, configuraciones e '
+                            'información técnica necesaria para seguridad y '
+                            'operación del servicio.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '4. Finalidades',
+                        children: [
+                          Text(
+                            'Los datos se utilizan para prestar y mantener '
+                            'ITONE, autenticar usuarios, aplicar permisos y '
+                            'aislamiento por empresa, procesar integraciones '
+                            'solicitadas, enviar comunicaciones operativas, '
+                            'prevenir abusos y mantener la seguridad, cumplir '
+                            'obligaciones legales y mejorar la confiabilidad '
+                            'del servicio.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '5. WhatsApp y proveedores externos',
+                        children: [
+                          Text(
+                            'Cuando una empresa conecta WhatsApp, ITONE procesa '
+                            'la información necesaria para recibir y enviar '
+                            'mensajes mediante los servicios de Meta, conforme '
+                            'a la autorización otorgada por esa empresa y a '
+                            'las políticas aplicables de Meta. También podemos '
+                            'utilizar proveedores de infraestructura y '
+                            'almacenamiento, como Supabase, bajo controles de '
+                            'seguridad y confidencialidad.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '6. Seguridad y conservación',
+                        children: [
+                          Text(
+                            'Aplicamos controles de autenticación, permisos '
+                            'por empresa, políticas de acceso y registros de '
+                            'auditoría. Conservamos la información durante el '
+                            'tiempo necesario para prestar el servicio, cumplir '
+                            'obligaciones legales o atender reclamaciones, y '
+                            'la eliminamos o anonimizamos cuando corresponda.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '7. Derechos de los titulares',
+                        children: [
+                          Text(
+                            'Los titulares pueden solicitar conocer, actualizar, '
+                            'rectificar o eliminar sus datos, así como consultar '
+                            'el uso de la información, de acuerdo con la '
+                            'legislación aplicable. Las solicitudes deben '
+                            'presentarse a IT DATA SAS o a la empresa cliente '
+                            'que administra el espacio donde fueron tratados.',
+                          ),
+                        ],
+                      ),
+                      const _PrivacySection(
+                        title: '8. Contacto y cambios',
+                        children: [
+                          Text(
+                            'Para preguntas sobre esta política o solicitudes '
+                            'relacionadas con privacidad, contacta a IT DATA SAS '
+                            'por sus canales corporativos oficiales. Esta política '
+                            'puede actualizarse para reflejar cambios legales, '
+                            'operativos o tecnológicos; la fecha de actualización '
+                            'se mostrará en esta página.',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrivacySection extends StatelessWidget {
+  const _PrivacySection({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          ...children,
+        ],
+      ),
     );
   }
 }
