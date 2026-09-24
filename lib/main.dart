@@ -3046,12 +3046,7 @@ class _WhatsAppSettings extends StatelessWidget {
               children: [
                 _WhatsAppIntegrationPanel(tenantId: tenantId),
                 _WhatsAppWelcomeSettings(tenantId: tenantId),
-                _WhatsAppSettingPanel(
-                  icon: Icons.account_tree_outlined,
-                  title: 'Flujo de mensajes',
-                  description: 'Diseña el recorrido de atención: menú inicial, respuestas, derivación a un agente y cierre de la conversación.',
-                  actionLabel: 'Crear flujo',
-                ),
+                _WhatsAppFlowSettings(tenantId: tenantId),
                 _WhatsAppSettingPanel(
                   icon: Icons.timer_outlined,
                   title: 'Acuerdos de nivel de servicio',
@@ -3494,6 +3489,335 @@ class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
           Text(_feedback!),
         ],
       ],
+    );
+  }
+}
+
+class _WhatsAppFlowSettings extends StatefulWidget {
+  const _WhatsAppFlowSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_WhatsAppFlowSettings> createState() => _WhatsAppFlowSettingsState();
+}
+
+class _WhatsAppFlowSettingsState extends State<_WhatsAppFlowSettings> {
+  final _nameController = TextEditingController();
+  final _initialMessageController = TextEditingController();
+  final List<_WhatsAppFlowOption> _options = [];
+  bool _loading = true;
+  bool _saving = false;
+  bool _editing = false;
+  bool _active = false;
+  String? _feedback;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _initialMessageController.dispose();
+    for (final option in _options) {
+      option.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_integrations')
+          .select('status, metadata')
+          .eq('tenant_id', widget.tenantId)
+          .eq('provider', 'whatsapp_flow')
+          .maybeSingle();
+      if (row != null) {
+        final metadata = Map<String, dynamic>.from(
+          (row['metadata'] as Map?) ?? const {},
+        );
+        _active = row['status'] == 'active';
+        _nameController.text = metadata['name'] as String? ?? '';
+        _initialMessageController.text =
+            metadata['initial_message'] as String? ?? '';
+        final savedOptions = metadata['options'] as List? ?? const [];
+        for (final saved in savedOptions) {
+          final option = Map<String, dynamic>.from(saved as Map);
+          _options.add(
+            _WhatsAppFlowOption(
+              label: option['label'] as String? ?? '',
+              response: option['response'] as String? ?? '',
+              handoff: option['handoff'] as bool? ?? false,
+            ),
+          );
+        }
+      }
+    } on PostgrestException catch (error) {
+      _feedback = error.message;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_nameController.text.trim().isEmpty ||
+        _initialMessageController.text.trim().isEmpty ||
+        _options.isEmpty ||
+        _options.any((option) => option.label.text.trim().isEmpty)) {
+      setState(
+        () => _feedback =
+            'Completa el nombre, el mensaje inicial y al menos una opción.',
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _feedback = null;
+    });
+    try {
+      await Supabase.instance.client.from('tenant_integrations').upsert({
+        'tenant_id': widget.tenantId,
+        'provider': 'whatsapp_flow',
+        'status': _active ? 'active' : 'disabled',
+        'metadata': {
+          'name': _nameController.text.trim(),
+          'initial_message': _initialMessageController.text.trim(),
+          'options': _options
+              .map(
+                (option) => {
+                  'label': option.label.text.trim(),
+                  'response': option.response.text.trim(),
+                  'handoff': option.handoff,
+                },
+              )
+              .toList(),
+        },
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'tenant_id,provider');
+      if (mounted) {
+        setState(() {
+          _editing = false;
+          _feedback = 'Flujo guardado correctamente.';
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _feedback = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _addOption() {
+    setState(() {
+      _options.add(_WhatsAppFlowOption());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final readOnly = !_editing;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.account_tree_outlined,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Flujo de mensajes',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Chip(label: Text(_active ? 'Activo' : 'Inactivo')),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => setState(() => _editing = true),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Diseña el recorrido inicial de atención y define cuándo una opción debe pasar a un agente.',
+        ),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _nameController,
+          readOnly: readOnly,
+          decoration: const InputDecoration(
+            labelText: 'Nombre del flujo',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 14),
+        SwitchListTile(
+          value: _active,
+          onChanged: readOnly
+              ? null
+              : (value) => setState(() => _active = value),
+          title: const Text('Activar flujo'),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _initialMessageController,
+          readOnly: readOnly,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Mensaje inicial',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Opciones del menú',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (!readOnly)
+              OutlinedButton.icon(
+                onPressed: _addOption,
+                icon: const Icon(Icons.add),
+                label: const Text('Agregar opción'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_options.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Aún no hay opciones configuradas. Pulsa Editar para crear la primera.',
+              ),
+            ),
+          ),
+        for (var index = 0; index < _options.length; index++)
+          _WhatsAppFlowOptionEditor(
+            option: _options[index],
+            index: index,
+            readOnly: readOnly,
+            onRemove: () => setState(() => _options.removeAt(index).dispose()),
+          ),
+        if (!readOnly) ...[
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(_saving ? 'Guardando...' : 'Guardar flujo'),
+          ),
+          TextButton(
+            onPressed: _saving ? null : () => setState(() => _editing = false),
+            child: const Text('Cancelar'),
+          ),
+        ],
+        if (_feedback != null) ...[
+          const SizedBox(height: 10),
+          Text(_feedback!),
+        ],
+      ],
+    );
+  }
+}
+
+class _WhatsAppFlowOption {
+  _WhatsAppFlowOption({
+    String label = '',
+    String response = '',
+    this.handoff = false,
+  }) : label = TextEditingController(text: label),
+       response = TextEditingController(text: response);
+
+  final TextEditingController label;
+  final TextEditingController response;
+  bool handoff;
+
+  void dispose() {
+    label.dispose();
+    response.dispose();
+  }
+}
+
+class _WhatsAppFlowOptionEditor extends StatefulWidget {
+  const _WhatsAppFlowOptionEditor({
+    required this.option,
+    required this.index,
+    required this.readOnly,
+    required this.onRemove,
+  });
+
+  final _WhatsAppFlowOption option;
+  final int index;
+  final bool readOnly;
+  final VoidCallback onRemove;
+
+  @override
+  State<_WhatsAppFlowOptionEditor> createState() =>
+      _WhatsAppFlowOptionEditorState();
+}
+
+class _WhatsAppFlowOptionEditorState extends State<_WhatsAppFlowOptionEditor> {
+  @override
+  Widget build(BuildContext context) {
+    final option = widget.option;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Text('Opción ${widget.index + 1}'),
+                const Spacer(),
+                if (!widget.readOnly)
+                  IconButton(
+                    tooltip: 'Eliminar opción',
+                    onPressed: widget.onRemove,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+              ],
+            ),
+            TextField(
+              controller: option.label,
+              readOnly: widget.readOnly,
+              decoration: const InputDecoration(
+                labelText: 'Texto de la opción',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: option.response,
+              readOnly: widget.readOnly,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Respuesta automática',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            SwitchListTile(
+              value: option.handoff,
+              onChanged: widget.readOnly
+                  ? null
+                  : (value) => setState(() => option.handoff = value),
+              title: const Text('Derivar esta opción a un agente'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
