@@ -60,12 +60,26 @@ Deno.serve(async (request) => {
         }
 
         for (const status of value.statuses ?? []) {
+          const statusError = Array.isArray(status.errors)
+            ? status.errors[0]
+            : null;
+          const errorCode = statusError?.code != null
+            ? String(statusError.code)
+            : null;
+          const errorMessage = statusError
+            ? [statusError.title, statusError.message, statusError.details]
+                .filter((part) => typeof part === "string" && part.length > 0)
+                .join(": ")
+            : null;
           console.log("WhatsApp message status received", {
             phoneNumberId,
             messageId: status.id,
             status: status.status,
             recipientId: status.recipient_id,
             timestamp: status.timestamp,
+            errorCode,
+            errorMessage,
+            errors: status.errors ?? [],
           });
           if (typeof status.id === "string" && typeof status.status === "string") {
             const deliveryStatus = ["sent", "delivered", "read", "failed"].includes(
@@ -75,7 +89,11 @@ Deno.serve(async (request) => {
               : "accepted";
             const { error: statusError } = await client
               .from("whatsapp_messages")
-              .update({ delivery_status: deliveryStatus })
+              .update({
+                delivery_status: deliveryStatus,
+                delivery_error_code: errorCode,
+                delivery_error: errorMessage,
+              })
               .eq("provider_message_id", status.id)
               .eq("whatsapp_account_id", account.id);
             if (statusError) console.error("WhatsApp status update failed", statusError);

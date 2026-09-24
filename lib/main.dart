@@ -4895,7 +4895,9 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     try {
       final rows = await _client
           .from('whatsapp_messages')
-          .select('id, direction, message_type, body, created_at, provider_timestamp')
+          .select(
+            'id, direction, message_type, body, created_at, provider_timestamp, delivery_status, delivery_error',
+          )
           .eq('tenant_id', widget.tenantId)
           .eq('conversation_id', conversationId)
           .order('created_at', ascending: true);
@@ -5078,7 +5080,32 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                             alignment: sent ? Alignment.centerRight : Alignment.centerLeft,
                             child: Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: _MessageBubble(text: message['body'] as String? ?? '[Mensaje no compatible]', sent: sent, theme: theme),
+                              child: Column(
+                                crossAxisAlignment: sent
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  _MessageBubble(
+                                    text: message['body'] as String? ??
+                                        '[Mensaje no compatible]',
+                                    sent: sent,
+                                    theme: theme,
+                                  ),
+                                  if (sent &&
+                                      message['delivery_status'] == 'failed' &&
+                                      message['delivery_error'] is String)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        'No entregado: ${message['delivery_error']}',
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           );
                         },

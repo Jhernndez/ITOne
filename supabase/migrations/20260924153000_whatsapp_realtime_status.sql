@@ -2,6 +2,10 @@ alter table public.whatsapp_messages
   add column if not exists delivery_status text not null default 'accepted'
   check (delivery_status in ('accepted', 'sent', 'delivered', 'read', 'failed'));
 
+alter table public.whatsapp_messages
+  add column if not exists delivery_error_code text,
+  add column if not exists delivery_error text;
+
 do $$
 begin
   if not exists (
