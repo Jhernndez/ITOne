@@ -374,9 +374,24 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
       if (!mounted) return;
       setState(() {
         _tenants = List<Map<String, dynamic>>.from(tenants);
-        _accessUsers = accessUsers
-            .map((item) => Map<String, dynamic>.from(item as Map))
-            .toList();
+        final grouped = <String, Map<String, dynamic>>{};
+        for (final item in accessUsers) {
+          final row = Map<String, dynamic>.from(item as Map);
+          final userId = row['user_id'] as String;
+          final user = grouped.putIfAbsent(userId, () => {
+                ...row,
+                'tenant_access': <Map<String, dynamic>>[],
+              });
+          final tenantId = row['tenant_id'] as String?;
+          if (tenantId != null) {
+            (user['tenant_access'] as List<Map<String, dynamic>>).add({
+              'tenant_id': tenantId,
+              'tenant_name': row['tenant_name'],
+              'tenant_role': row['tenant_role'],
+            });
+          }
+        }
+        _accessUsers = grouped.values.toList();
         _loading = false;
       });
     } catch (error) {
@@ -425,19 +440,15 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
   Future<void> _updateAccess({
     required String userId,
     required String? platformRole,
-    required String? tenantId,
-    required String? tenantRole,
-    required String? currentTenantId,
+    required List<Map<String, String>> tenantAccess,
   }) async {
     try {
       await Supabase.instance.client.rpc(
-        'update_platform_access',
+        'update_platform_access_bulk',
         params: {
           'p_user_id': userId,
           'p_platform_role': platformRole,
-          'p_tenant_id': tenantId,
-          'p_tenant_role': tenantRole,
-          'p_current_tenant_id': currentTenantId,
+          'p_tenant_access': tenantAccess,
         },
       );
       if (mounted) {
@@ -591,8 +602,36 @@ class _PlatformInvitationsPageState extends State<PlatformInvitationsPage> {
                                 DataCell(Text(user['email'] as String? ?? '')),
                                 DataCell(Text(
                                     user['platform_role'] as String? ?? 'Tenant')),
-                                DataCell(Text(user['tenant_name'] as String? ?? '')),
-                                DataCell(Text(user['tenant_role'] as String? ?? '')),
+                                DataCell(Text(
+                                  ((user['tenant_access'] as List<dynamic>?)
+                                              ?.map((item) =>
+                                                  (item as Map)['tenant_name'])
+                                              .whereType<String>()
+                                              .join(', '))
+                                          ?.isNotEmpty ==
+                                      true
+                                      ? (user['tenant_access'] as List<dynamic>)
+                                          .map((item) =>
+                                              (item as Map)['tenant_name'])
+                                          .whereType<String>()
+                                          .join(', ')
+                                      : 'Sin tenant',
+                                )),
+                                DataCell(Text(
+                                  ((user['tenant_access'] as List<dynamic>?)
+                                              ?.map((item) =>
+                                                  (item as Map)['tenant_role'])
+                                              .whereType<String>()
+                                              .join(', '))
+                                          ?.isNotEmpty ==
+                                      true
+                                      ? (user['tenant_access'] as List<dynamic>)
+                                          .map((item) =>
+                                              (item as Map)['tenant_role'])
+                                          .whereType<String>()
+                                          .join(', ')
+                                      : 'Sin rol',
+                                )),
                               ],
                             );
                           }).toList(),
@@ -661,9 +700,7 @@ class _UserSidePanel extends StatefulWidget {
   final Future<void> Function({
     required String userId,
     required String? platformRole,
-    required String? tenantId,
-    required String? tenantRole,
-    required String? currentTenantId,
+    required List<Map<String, String>> tenantAccess,
   }) onSavePermissions;
   final Future<void> Function(
     String email,
@@ -931,9 +968,7 @@ class _AccessUserCard extends StatefulWidget {
   final Future<void> Function({
     required String userId,
     required String? platformRole,
-    required String? tenantId,
-    required String? tenantRole,
-    required String? currentTenantId,
+    required List<Map<String, String>> tenantAccess,
   }) onSave;
   final Future<void> Function(
     String email,
@@ -950,8 +985,12 @@ class _AccessUserCard extends StatefulWidget {
 class _AccessUserCardState extends State<_AccessUserCard> {
   final _newEmailController = TextEditingController();
   late String? _platformRole = widget.access['platform_role'] as String?;
-  late String? _tenantId = widget.access['tenant_id'] as String?;
-  late String? _tenantRole = widget.access['tenant_role'] as String?;
+  late final Map<String, String> _tenantRoles = {
+    for (final item
+        in (widget.access['tenant_access'] as List<dynamic>? ?? const []))
+      (item as Map)['tenant_id'] as String:
+          (item['tenant_role'] as String?) ?? 'supervisor',
+  };
   bool _saving = false;
 
   @override
@@ -1005,55 +1044,59 @@ class _AccessUserCardState extends State<_AccessUserCard> {
               ],
               onChanged: (value) => setState(() => _platformRole = value),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String?>(
-              initialValue: _tenantId,
-              decoration: const InputDecoration(
-                labelText: 'Tenant',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                const DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('Sin acceso a tenant'),
-                ),
-                ...widget.tenants.map(
-                  (tenant) => DropdownMenuItem<String?>(
-                    value: tenant['id'] as String,
-                    child: Text(tenant['name'] as String),
-                  ),
-                ),
-              ],
-              onChanged: (value) => setState(() {
-                _tenantId = value;
-                if (value == null) _tenantRole = null;
-              }),
+            const SizedBox(height: 20),
+            Text(
+              'Tenants con permisos',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            if (_tenantId != null) ...[
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String?>(
-                initialValue: _tenantRole,
-                decoration: const InputDecoration(
-                  labelText: 'Rol dentro del tenant',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'tenant_admin',
-                    child: Text('Administrador del tenant'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'supervisor',
-                    child: Text('Supervisor'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'operator',
-                    child: Text('Operador'),
-                  ),
-                ],
-                onChanged: (value) => setState(() => _tenantRole = value),
-              ),
-            ],
+            const SizedBox(height: 6),
+            const Text(
+              'Selecciona una o varias empresas. El usuario podrá elegir '
+              'una de ellas al entrar a ITONE.',
+            ),
+            const SizedBox(height: 8),
+            ...widget.tenants.map((tenant) {
+              final tenantId = tenant['id'] as String;
+              final selected = _tenantRoles.containsKey(tenantId);
+              return CheckboxListTile(
+                value: selected,
+                contentPadding: EdgeInsets.zero,
+                title: Text(tenant['name'] as String),
+                subtitle: selected
+                    ? DropdownButton<String>(
+                        value: _tenantRoles[tenantId],
+                        isExpanded: true,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'tenant_admin',
+                            child: Text('Administrador del tenant'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'supervisor',
+                            child: Text('Supervisor'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'operator',
+                            child: Text('Operador'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _tenantRoles[tenantId] = value);
+                          }
+                        },
+                      )
+                    : const Text('Sin acceso'),
+                onChanged: (value) => setState(() {
+                  if (value == true) {
+                    if (widget.isNew) _tenantRoles.clear();
+                    _tenantRoles[tenantId] = 'supervisor';
+                  } else {
+                    _tenantRoles.remove(tenantId);
+                  }
+                }),
+              );
+            }),
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
@@ -1066,17 +1109,21 @@ class _AccessUserCardState extends State<_AccessUserCard> {
                           await widget.onInvite(
                             _newEmailController.text.trim().toLowerCase(),
                             _platformRole,
-                            _tenantId,
-                            _tenantRole ?? 'supervisor',
+                            _tenantRoles.isEmpty ? null : _tenantRoles.keys.first,
+                            _tenantRoles.isEmpty
+                                ? 'supervisor'
+                                : _tenantRoles.values.first,
                           );
                         } else {
                           await widget.onSave(
                             userId: widget.access['user_id'] as String,
                             platformRole: _platformRole,
-                            tenantId: _tenantId,
-                            tenantRole: _tenantRole,
-                            currentTenantId:
-                                widget.access['tenant_id'] as String?,
+                            tenantAccess: _tenantRoles.entries
+                                .map((entry) => {
+                                      'tenant_id': entry.key,
+                                      'tenant_role': entry.value,
+                                    })
+                                .toList(),
                           );
                         }
                         if (mounted) setState(() => _saving = false);
