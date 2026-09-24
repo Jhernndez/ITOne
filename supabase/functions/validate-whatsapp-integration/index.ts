@@ -76,8 +76,8 @@ Deno.serve(async (request) => {
     }
 
     const graphResponse = await fetch(
-      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,health_status`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,health_status,quality_rating,messaging_limit_tier,name_status,code_verification_status,status,account_mode`,
+      { headers: { "Authorization": "Bearer " + accessToken } },
     );
     const graphData = await graphResponse.json();
     if (!graphResponse.ok) {
@@ -119,27 +119,46 @@ Deno.serve(async (request) => {
         messaging_errors: entity.can_send_message === "BLOCKED" ? entity.errors ?? null : null,
       }));
 
+    // The phone number's own `status` field can also signal a restriction
+    // (VERIFIED is healthy; RESTRICTED/FLAGGED/DISABLED mean Meta blocked it),
+    // independent of what health_status.entities reports.
+    const restrictedPhoneStatuses = ["RESTRICTED", "FLAGGED", "DISABLED"];
+    const isPhoneRestricted = restrictedPhoneStatuses.includes(graphData.status);
+    const isRestricted = blockedEntities.length > 0 || isPhoneRestricted;
+
     const safeMetadata = {
       ...metadata,
       verified_phone_number_id: graphData.id ?? phoneNumberId,
       verified_display_phone_number: graphData.display_phone_number ?? null,
       verified_name: graphData.verified_name ?? null,
       health_status: graphData.health_status ?? null,
+      quality_rating: graphData.quality_rating ?? null,
+      messaging_limit_tier: graphData.messaging_limit_tier ?? null,
+      name_status: graphData.name_status ?? null,
+      code_verification_status: graphData.code_verification_status ?? null,
+      phone_status: graphData.status ?? null,
+      account_mode: graphData.account_mode ?? null,
     };
     await adminClient.from("tenant_integrations").update({
-      status: blockedEntities.length > 0 ? "restricted" : "active",
+      status: isRestricted ? "restricted" : "active",
       configured_at: new Date().toISOString(),
       metadata: safeMetadata,
       updated_at: new Date().toISOString(),
     }).eq("id", integration.id);
 
     return json({
-      status: blockedEntities.length > 0 ? "restricted" : "active",
-      message: blockedEntities.length > 0
+      status: isRestricted ? "restricted" : "active",
+      message: isRestricted
         ? "Meta reporta restricciones activas sobre esta integración."
         : "Conexión con Meta validada correctamente.",
       verified_name: graphData.verified_name ?? null,
       health_status: graphData.health_status ?? null,
+      quality_rating: graphData.quality_rating ?? null,
+      messaging_limit_tier: graphData.messaging_limit_tier ?? null,
+      name_status: graphData.name_status ?? null,
+      code_verification_status: graphData.code_verification_status ?? null,
+      phone_status: graphData.status ?? null,
+      account_mode: graphData.account_mode ?? null,
       blocked_entities: blockedEntities,
     });
   } catch (error) {
