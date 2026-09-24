@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
     }
 
     const graphResponse = await fetch(
-      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name`,
+      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,health_status`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     const graphData = await graphResponse.json();
@@ -88,23 +88,36 @@ Deno.serve(async (request) => {
       return json({ status: "error", error: graphData.error?.message ?? "Meta rejected the token" }, 400);
     }
 
+    const healthEntities = Array.isArray(graphData.health_status?.entities)
+      ? graphData.health_status.entities
+      : [];
+    const blockedEntities = healthEntities.filter(
+      (entity: { can_send_message?: string }) =>
+        entity.can_send_message && entity.can_send_message !== "AVAILABLE",
+    );
+
     const safeMetadata = {
       ...metadata,
       verified_phone_number_id: graphData.id ?? phoneNumberId,
       verified_display_phone_number: graphData.display_phone_number ?? null,
       verified_name: graphData.verified_name ?? null,
+      health_status: graphData.health_status ?? null,
     };
     await adminClient.from("tenant_integrations").update({
-      status: "active",
+      status: blockedEntities.length > 0 ? "restricted" : "active",
       configured_at: new Date().toISOString(),
       metadata: safeMetadata,
       updated_at: new Date().toISOString(),
     }).eq("id", integration.id);
 
     return json({
-      status: "active",
-      message: "Conexión con Meta validada correctamente.",
+      status: blockedEntities.length > 0 ? "restricted" : "active",
+      message: blockedEntities.length > 0
+        ? "Meta reporta restricciones activas sobre esta integración."
+        : "Conexión con Meta validada correctamente.",
       verified_name: graphData.verified_name ?? null,
+      health_status: graphData.health_status ?? null,
+      blocked_entities: blockedEntities,
     });
   } catch (error) {
     console.error("WhatsApp integration validation error", error);

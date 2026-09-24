@@ -3305,6 +3305,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   bool _editing = false;
   String _status = 'not_configured';
   String? _message;
+  List<Map<String, dynamic>> _blockedEntities = [];
 
   @override
   void initState() {
@@ -3393,6 +3394,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
     setState(() {
       _validating = true;
       _message = null;
+      _blockedEntities = [];
     });
     try {
       final response = await Supabase.instance.client.functions.invoke(
@@ -3402,12 +3404,16 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
       final data = Map<String, dynamic>.from(
         (response.data as Map?) ?? const {},
       );
+      final blocked = (data['blocked_entities'] as List?) ?? const [];
       if (mounted) {
         setState(() {
           _status = data['status'] as String? ?? 'error';
           _message =
               data['message'] as String? ??
               'La validación terminó sin un mensaje.';
+          _blockedEntities = blocked
+              .map((entry) => Map<String, dynamic>.from(entry as Map))
+              .toList();
         });
       }
     } on FunctionException catch (error) {
@@ -3514,6 +3520,40 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ),
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
+        if (_blockedEntities.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Meta reporta restricciones en:',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.red.shade700,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                for (final entity in _blockedEntities)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '• ${entity['entity_type'] ?? entity['entity'] ?? 'Desconocido'}: '
+                      '${entity['can_send_message'] ?? 'N/D'}'
+                      '${entity['errors'] != null ? ' — ${entity['errors']}' : ''}',
+                      style: const TextStyle(color: Colors.black87),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
         if (!readOnly) ...[
           const SizedBox(height: 10),
           TextButton(
