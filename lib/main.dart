@@ -3546,7 +3546,8 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
                     child: Text(
                       '• ${entity['entity_type'] ?? entity['entity'] ?? 'Desconocido'}: '
                       '${entity['can_send_message'] ?? 'N/D'}'
-                      '${entity['errors'] != null ? ' — ${entity['errors']}' : ''}',
+                      '${entity['additional_info'] != null ? ' — ${entity['additional_info']}' : ''}'
+                      '${entity['messaging_errors'] != null ? ' — ${entity['messaging_errors']}' : ''}',
                       style: const TextStyle(color: Colors.black87),
                     ),
                   ),

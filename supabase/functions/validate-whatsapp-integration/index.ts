@@ -91,10 +91,33 @@ Deno.serve(async (request) => {
     const healthEntities = Array.isArray(graphData.health_status?.entities)
       ? graphData.health_status.entities
       : [];
-    const blockedEntities = healthEntities.filter(
-      (entity: { can_send_message?: string }) =>
-        entity.can_send_message && entity.can_send_message !== "AVAILABLE",
-    );
+    // Only flag entities whose `can_send_message` (text messaging) status is not
+    // AVAILABLE. The `can_receive_call_sip` status and its `errors` refer to the
+    // separate WhatsApp Calling/SIP feature and must not be treated as a
+    // messaging blocker, even if they appear on the same entity object.
+    const blockedEntities = healthEntities
+      .filter(
+        (entity: { can_send_message?: string }) =>
+          entity.can_send_message && entity.can_send_message !== "AVAILABLE",
+      )
+      .map((
+        entity: {
+          entity_type?: string;
+          id?: string;
+          can_send_message?: string;
+          additional_info?: string[];
+          errors?: unknown[];
+        },
+      ) => ({
+        entity_type: entity.entity_type,
+        id: entity.id,
+        can_send_message: entity.can_send_message,
+        // Real reason messaging is LIMITED/BLOCKED for this entity.
+        additional_info: entity.additional_info ?? null,
+        // Only surface `errors` when the messaging status itself is BLOCKED;
+        // otherwise these errors belong to an unrelated capability (e.g. calling/SIP).
+        messaging_errors: entity.can_send_message === "BLOCKED" ? entity.errors ?? null : null,
+      }));
 
     const safeMetadata = {
       ...metadata,
