@@ -1583,51 +1583,310 @@ class TenantWorkspacePage extends StatelessWidget {
           );
         }
         final tenant = snapshot.data!;
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(tenant['name'] as String),
-            actions: [
-              IconButton(
-                tooltip: 'Cerrar sesión',
-                onPressed: () => Supabase.instance.client.auth.signOut(),
-                icon: const Icon(Icons.logout),
+        return TenantOperationsShell(
+          initialMembership: {
+            ...membership,
+            'tenants': tenant,
+          },
+        );
+      },
+    );
+  }
+}
+
+class TenantOperationsShell extends StatefulWidget {
+  const TenantOperationsShell({super.key, required this.initialMembership});
+
+  final Map<String, dynamic> initialMembership;
+
+  @override
+  State<TenantOperationsShell> createState() => _TenantOperationsShellState();
+}
+
+class _TenantOperationsShellState extends State<TenantOperationsShell> {
+  late Map<String, dynamic> _activeMembership = widget.initialMembership;
+  int _selectedIndex = 0;
+  late final Future<List<Map<String, dynamic>>> _memberships = _loadMemberships();
+
+  Future<List<Map<String, dynamic>>> _loadMemberships() async {
+    final rows = await Supabase.instance.client
+        .from('tenant_memberships')
+        .select('tenant_id, role, tenants(id, name, slug)')
+        .eq('user_id', Supabase.instance.client.auth.currentUser!.id);
+    final memberships =
+        List<Map<String, dynamic>>.from(rows.map((row) => Map<String, dynamic>.from(row)));
+    if (memberships.isEmpty) return [widget.initialMembership];
+    return memberships;
+  }
+
+  String get _role => _activeMembership['role'] as String? ?? 'operator';
+
+  List<_TenantModule> get _modules => [
+        const _TenantModule('Dashboard', Icons.dashboard_outlined),
+        const _TenantModule('Clientes', Icons.people_outline),
+        const _TenantModule('Conversaciones', Icons.forum_outlined),
+        const _TenantModule('Tickets', Icons.confirmation_number_outlined),
+        const _TenantModule('Agenda', Icons.calendar_month_outlined),
+        if (_role != 'operator')
+          const _TenantModule('Reportes', Icons.bar_chart_outlined),
+        if (_role == 'tenant_admin')
+          const _TenantModule('Usuarios y permisos', Icons.manage_accounts_outlined),
+        if (_role == 'tenant_admin')
+          const _TenantModule('Configuración', Icons.settings_outlined),
+      ];
+
+  void _changeTenant(Map<String, dynamic> membership) {
+    setState(() {
+      _activeMembership = membership;
+      _selectedIndex = 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tenant = _activeMembership['tenants'] as Map<String, dynamic>;
+    final modules = _modules;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(tenant['name'] as String),
+        actions: [
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: _memberships,
+            builder: (context, snapshot) {
+              final memberships = snapshot.data ?? const [];
+              if (memberships.length < 2) return const SizedBox.shrink();
+              return PopupMenuButton<String>(
+                tooltip: 'Cambiar empresa',
+                icon: const Icon(Icons.swap_horiz),
+                onSelected: (tenantId) {
+                  final selected = memberships.firstWhere(
+                    (item) => item['tenant_id'] == tenantId,
+                  );
+                  _changeTenant(selected);
+                },
+                itemBuilder: (context) => memberships.map((item) {
+                  final itemTenant = item['tenants'] as Map<String, dynamic>;
+                  return PopupMenuItem(
+                    value: item['tenant_id'] as String,
+                    child: Text(itemTenant['name'] as String),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Cuenta',
+            onSelected: (value) {
+              if (value == 'logout') {
+                Supabase.instance.client.auth.signOut();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                enabled: false,
+                child: Text(
+                  Supabase.instance.client.auth.currentUser?.email ?? '',
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Text('Cerrar sesión'),
+              ),
+            ],
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Icon(Icons.account_circle_outlined),
+            ),
+          ),
+        ],
+      ),
+      drawer: Drawer(
+        child: SafeArea(
+          child: Column(
+            children: [
+              UserAccountsDrawerHeader(
+                accountName: Text(tenant['name'] as String),
+                accountEmail: Text(
+                  '${_roleLabel(_role)} · ${tenant['slug']}',
+                ),
+                currentAccountPicture: CircleAvatar(
+                  child: Text((tenant['name'] as String).substring(0, 1)),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: modules.length,
+                  itemBuilder: (context, index) => ListTile(
+                    leading: Icon(modules[index].icon),
+                    title: Text(modules[index].label),
+                    selected: index == _selectedIndex,
+                    onTap: () {
+                      setState(() => _selectedIndex = index);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Cerrar sesión'),
+                onTap: () => Supabase.instance.client.auth.signOut(),
               ),
             ],
           ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Espacio empresarial',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Este contenido pertenece exclusivamente a tu tenant.',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 28),
-                    Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.business),
-                        title: Text(tenant['name'] as String),
-                        subtitle: Text(
-                          'Identificador: ${tenant['slug']}\nRol: ${membership['role']}',
-                        ),
+        ),
+      ),
+      body: _TenantModuleContent(
+        module: modules[_selectedIndex],
+        tenant: tenant,
+        role: _role,
+      ),
+    );
+  }
+}
+
+class _TenantModule {
+  const _TenantModule(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+}
+
+String _roleLabel(String role) {
+  switch (role) {
+    case 'tenant_admin':
+      return 'Administrador';
+    case 'supervisor':
+      return 'Supervisor';
+    default:
+      return 'Operador';
+  }
+}
+
+class _TenantModuleContent extends StatelessWidget {
+  const _TenantModuleContent({
+    required this.module,
+    required this.tenant,
+    required this.role,
+  });
+
+  final _TenantModule module;
+  final Map<String, dynamic> tenant;
+  final String role;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDashboard = module.label == 'Dashboard';
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1280),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  module.label,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                    ),
-                  ],
                 ),
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  isDashboard
+                      ? 'Resumen operativo de ${tenant['name']}.'
+                      : 'Módulo preparado para ${tenant['name']}.',
+                ),
+                const SizedBox(height: 28),
+                if (isDashboard) ...[
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: const [
+                      _MetricCard(
+                        title: 'Clientes activos',
+                        value: '0',
+                        icon: Icons.people_outline,
+                      ),
+                      _MetricCard(
+                        title: 'Conversaciones pendientes',
+                        value: '0',
+                        icon: Icons.forum_outlined,
+                      ),
+                      _MetricCard(
+                        title: 'Tickets abiertos',
+                        value: '0',
+                        icon: Icons.confirmation_number_outlined,
+                      ),
+                      _MetricCard(
+                        title: 'Actividades de hoy',
+                        value: '0',
+                        icon: Icons.today_outlined,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+                Card(
+                  child: ListTile(
+                    leading: Icon(module.icon),
+                    title: Text(
+                      isDashboard
+                          ? 'Bienvenido al centro de operaciones'
+                          : 'Este módulo estará disponible próximamente',
+                    ),
+                    subtitle: Text(
+                      isDashboard
+                          ? 'Rol actual: ${_roleLabel(role)}. Usa el menú lateral para navegar.'
+                          : 'La estructura de permisos ya está preparada para este módulo.',
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 270,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(icon, size: 30, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 14),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value, style: Theme.of(context).textTheme.headlineSmall),
+                  Text(title),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
