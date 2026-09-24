@@ -1234,6 +1234,36 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                FutureBuilder<Map<String, dynamic>?>(
+                  future: Supabase.instance.client
+                      .from('user_profiles')
+                      .select('full_name')
+                      .eq(
+                        'user_id',
+                        Supabase.instance.client.auth.currentUser?.id ?? '',
+                      )
+                      .maybeSingle()
+                      .then(
+                        (row) => row == null
+                            ? null
+                            : Map<String, dynamic>.from(row),
+                      ),
+                  builder: (context, snapshot) {
+                    final email =
+                        Supabase.instance.client.auth.currentUser?.email ?? '';
+                    final name = snapshot.data?['full_name'] as String? ??
+                        email.split('@').first;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    );
+                  },
+                ),
                 Text(
                   'Configura tu contraseña',
                   style: Theme.of(context).textTheme.headlineMedium,
@@ -1353,36 +1383,6 @@ class _AuthPageState extends State<AuthPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  FutureBuilder<Map<String, dynamic>?>(
-                    future: Supabase.instance.client
-                        .from('user_profiles')
-                        .select('full_name')
-                        .eq(
-                          'user_id',
-                          Supabase.instance.client.auth.currentUser!.id,
-                        )
-                        .maybeSingle()
-                        .then(
-                          (row) => row == null
-                              ? null
-                              : Map<String, dynamic>.from(row),
-                        ),
-                    builder: (context, snapshot) {
-                      final email =
-                          Supabase.instance.client.auth.currentUser?.email ?? '';
-                      final name =
-                          snapshot.data?['full_name'] as String? ?? email.split('@').first;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          'Bienvenido, ${name.isEmpty ? 'usuario' : name}',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      );
-                    },
-                  ),
                   Text(
                     'ITONE',
                     textAlign: TextAlign.center,
