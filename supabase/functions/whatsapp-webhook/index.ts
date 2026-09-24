@@ -106,7 +106,10 @@ Deno.serve(async (request) => {
 
     const payload = await request.json();
     const client = createClient(url, serviceKey);
-    console.log("WhatsApp webhook event received", payload);
+    // JSON.stringify avoids Deno's default console depth limit, which was
+    // truncating nested objects (e.g. change.value) to "[Object]" and
+    // hiding the actual message payload in the logs.
+    console.log("WhatsApp webhook event received", JSON.stringify(payload));
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
@@ -172,6 +175,12 @@ Deno.serve(async (request) => {
           if (typeof sender !== "string" ||
               typeof providerMessageId !== "string") {
             continue;
+          }
+          if (message.type === "unsupported") {
+            console.log(
+              "WhatsApp unsupported message raw payload",
+              JSON.stringify(message),
+            );
           }
 
           const profileName = value.contacts?.find(
