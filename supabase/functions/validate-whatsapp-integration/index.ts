@@ -49,8 +49,17 @@ Deno.serve(async (request) => {
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
-    if (!membership || membership.role !== "tenant_admin") {
-      return json({ error: "Only tenant administrators can validate WhatsApp" }, 403);
+    const { data: platformMembership } = await adminClient
+      .from("platform_memberships")
+      .select("role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const canValidate =
+      membership?.role === "tenant_admin" ||
+      platformMembership?.role === "platform_owner" ||
+      platformMembership?.role === "platform_admin";
+    if (!canValidate) {
+      return json({ error: "Only tenant or platform administrators can validate WhatsApp" }, 403);
     }
 
     const { data: integration, error: integrationError } = await adminClient
