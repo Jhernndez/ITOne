@@ -229,6 +229,36 @@ Deno.serve(async (request) => {
               provider_timestamp: messageTime,
             }, { onConflict: "whatsapp_account_id,provider_message_id" });
           if (messageError) throw messageError;
+
+          const { data: recipients, error: recipientsError } = await client
+            .from("tenant_memberships")
+            .select("user_id, role")
+            .eq("tenant_id", account.tenant_id)
+            .in("role", ["tenant_admin", "supervisor", "operator"]);
+          if (recipientsError) throw recipientsError;
+          if (recipients?.length) {
+            const notificationRows = recipients.map((recipient) => ({
+              tenant_id: account.tenant_id,
+              recipient_user_id: recipient.user_id,
+              type: "whatsapp_inbound",
+              title: "Nuevo mensaje de WhatsApp",
+              body: `${profileName ?? sender}: ${body ?? "Mensaje recibido"}`,
+              data: {
+                conversation_id: conversation.id,
+                provider_message_id: providerMessageId,
+                phone_number: sender,
+              },
+            }));
+            const { error: notificationError } = await client
+              .from("notifications")
+              .insert(notificationRows);
+            if (notificationError) {
+              console.error(
+                "WhatsApp notification creation failed",
+                notificationError,
+              );
+            }
+          }
         }
       }
     }

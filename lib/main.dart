@@ -3948,6 +3948,7 @@ class _IntegrationsSettings extends StatefulWidget {
 
 class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
   List<Map<String, dynamic>> _apiIntegrations = [];
+  Map<String, List<Map<String, dynamic>>> _resourcesByIntegration = {};
   bool _loading = true;
   String? _message;
 
@@ -3961,7 +3962,7 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
     try {
       final rows = await Supabase.instance.client
           .from('tenant_api_integrations')
-          .select('id, name, base_url, auth_type, enabled')
+          .select('id, name, base_url, auth_type, enabled, tenant_api_resources(id, name, path, http_method, enabled)')
           .eq('tenant_id', widget.tenantId)
           .order('name');
       if (mounted) {
@@ -3969,6 +3970,12 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
           _apiIntegrations = (rows as List)
               .map((row) => Map<String, dynamic>.from(row as Map))
               .toList();
+          _resourcesByIntegration = {
+            for (final integration in _apiIntegrations)
+              integration['id'] as String: ((integration['tenant_api_resources'] as List?) ?? const [])
+                  .map((resource) => Map<String, dynamic>.from(resource as Map))
+                  .toList(),
+          };
           _loading = false;
         });
       }
@@ -4064,6 +4071,94 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
     }
   }
 
+  Future<void> _addResource(String integrationId) async {
+      final nameController = TextEditingController();
+      final pathController = TextEditingController();
+      String method = 'GET';
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Agregar recurso API'),
+            content: SizedBox(
+              width: 430,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre',
+                      hintText: 'Citas',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: pathController,
+                    decoration: const InputDecoration(
+                      labelText: 'Ruta',
+                      hintText: '/appointments',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: method,
+                    decoration: const InputDecoration(labelText: 'Método HTTP'),
+                    items: const ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+                        .map((value) => DropdownMenuItem(value: value, child: Text(value)))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) setDialogState(() => method = value);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Guardar'),
+              ),
+            ],
+          ),
+        ),
+      );
+      final name = nameController.text.trim();
+      final path = pathController.text.trim();
+      nameController.dispose();
+      pathController.dispose();
+      if (result != true || name.isEmpty || path.isEmpty) return;
+      try {
+        await Supabase.instance.client.from('tenant_api_resources').insert({
+          'tenant_id': widget.tenantId,
+          'integration_id': integrationId,
+          'name': name,
+          'path': path.startsWith('/') ? path : '/$path',
+          'http_method': method,
+        });
+        await _loadApiIntegrations();
+      } on PostgrestException catch (error) {
+        if (mounted) setState(() => _message = error.message);
+      }
+    }
+
+  Future<void> _deleteResource(String id) async {
+      try {
+        await Supabase.instance.client
+            .from('tenant_api_resources')
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', widget.tenantId);
+        await _loadApiIntegrations();
+      } on PostgrestException catch (error) {
+        if (mounted) setState(() => _message = error.message);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final integrations = [
@@ -4150,14 +4245,48 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
                 subtitle: Text(
                   '${integration['base_url']} · Autenticación: ${integration['auth_type']}',
                 ),
-                trailing: IconButton(
-                  tooltip: 'Eliminar integración',
-                  onPressed: () => _deleteIntegration(integration['id'] as String),
-                  icon: const Icon(Icons.delete_outline),
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    IconButton(
+                      tooltip: 'Agregar recurso',
+                      onPressed: () => _addResource(integration['id'] as String),
+                      icon: const Icon(Icons.route_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Eliminar integración',
+                      onPressed: () => _deleteIntegration(integration['id'] as String),
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
+        if (_apiIntegrations.isNotEmpty)
+          for (final integration in _apiIntegrations)
+            if ((_resourcesByIntegration[integration['id'] as String] ?? []).isNotEmpty)
+              Card(
+                margin: const EdgeInsets.only(top: 4),
+                child: ExpansionTile(
+                  leading: const Icon(Icons.route_outlined),
+                  title: Text('Recursos de ${integration['name']}'),
+                  children: [
+                    for (final resource
+                        in _resourcesByIntegration[integration['id'] as String] ?? [])
+                      ListTile(
+                        dense: true,
+                        title: Text(resource['name'] as String),
+                        subtitle: Text('${resource['http_method']} ${resource['path']}'),
+                        trailing: IconButton(
+                          tooltip: 'Eliminar recurso',
+                          onPressed: () => _deleteResource(resource['id'] as String),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
       ],
     );
   }
