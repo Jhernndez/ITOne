@@ -2304,33 +2304,7 @@ class _TenantModuleContent extends StatelessWidget {
                       ? const _IpsAgentDashboard()
                       : const _IpsDashboard()
                 else if (isDashboard) ...[
-                  Wrap(
-                    spacing: 16,
-                    runSpacing: 16,
-                    children: const [
-                      _MetricCard(
-                        title: 'Clientes activos',
-                        value: '0',
-                        icon: Icons.people_outline,
-                      ),
-                      _MetricCard(
-                        title: 'Chats pendientes',
-                        value: '0',
-                        icon: Icons.chat_outlined,
-                      ),
-                      _MetricCard(
-                        title: 'Tickets abiertos',
-                        value: '0',
-                        icon: Icons.confirmation_number_outlined,
-                      ),
-                      _MetricCard(
-                        title: 'Actividades de hoy',
-                        value: '0',
-                        icon: Icons.today_outlined,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
+                  _OperationsDashboard(tenantName: tenant['name'] as String),
                 ],
                 if (isWhatsApp)
                   _WhatsAppBusinessInbox(
@@ -2346,9 +2320,17 @@ class _TenantModuleContent extends StatelessWidget {
                       tenant['logo_url'] = logoUrl;
                     },
                   ),
+                if (module.label == 'Clientes') const _DemoClientsPage(),
+                if (module.label == 'Tickets') const _DemoTicketsPage(),
+                if (module.label == 'Agenda') const _DemoAgendaPage(),
+                if (module.label == 'Reportes') const _DemoReportsPage(),
                 if (!isDashboard &&
                     !isWhatsApp &&
-                    module.label != 'Configuración')
+                    module.label != 'Configuración' &&
+                    module.label != 'Clientes' &&
+                    module.label != 'Tickets' &&
+                    module.label != 'Agenda' &&
+                    module.label != 'Reportes')
                   Card(
                     child: ListTile(
                       leading: Icon(module.icon),
@@ -2371,6 +2353,576 @@ class _TenantModuleContent extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OperationsDashboard extends StatelessWidget {
+  const _OperationsDashboard({required this.tenantName});
+
+  final String tenantName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _DemoModeBanner(),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: const [
+            _MetricCard(
+              title: 'Clientes activos',
+              value: '24',
+              icon: Icons.people_outline,
+            ),
+            _MetricCard(
+              title: 'Conversaciones pendientes',
+              value: '8',
+              icon: Icons.chat_outlined,
+            ),
+            _MetricCard(
+              title: 'Tickets abiertos',
+              value: '12',
+              icon: Icons.confirmation_number_outlined,
+            ),
+            _MetricCard(
+              title: 'Actividades de hoy',
+              value: '16',
+              icon: Icons.today_outlined,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _RecentActivityCard(tenantName: tenantName)),
+            const SizedBox(width: 16),
+            const Expanded(child: _SlaSummaryCard()),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _DemoModeBanner extends StatelessWidget {
+  const _DemoModeBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: colors.primaryContainer.withValues(alpha: 0.45),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome_outlined, color: colors.primary),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Modo demostración activo',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Estos registros son ejemplos para explorar ITONE. '
+                    'Los datos reales de tu empresa aparecerán al operar los módulos.',
+                  ),
+                ],
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: null,
+              icon: Icon(Icons.info_outline),
+              label: Text('Datos de ejemplo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecentActivityCard extends StatelessWidget {
+  const _RecentActivityCard({required this.tenantName});
+
+  final String tenantName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Actividad reciente',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+            _ActivityRow(
+              icon: Icons.chat_bubble_outline,
+              color: Colors.green,
+              title: 'Nueva conversación de Carlos Rodríguez',
+              subtitle: 'WhatsApp · Hace 8 minutos',
+            ),
+            _ActivityRow(
+              icon: Icons.confirmation_number_outlined,
+              color: Colors.orange,
+              title: 'Ticket #1042 asignado a Ana Martínez',
+              subtitle: 'Soporte · Hace 21 minutos',
+            ),
+            _ActivityRow(
+              icon: Icons.person_add_alt_outlined,
+              color: Colors.blue,
+              title: 'Nuevo cliente agregado a $tenantName',
+              subtitle: 'Clientes · Hace 42 minutos',
+            ),
+            _ActivityRow(
+              icon: Icons.calendar_month_outlined,
+              color: Colors.deepPurple,
+              title: 'Cita de seguimiento confirmada',
+              subtitle: 'Agenda · Hoy, 3:00 p. m.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  const _ActivityRow({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(
+        backgroundColor: color.withValues(alpha: 0.12),
+        foregroundColor: color,
+        child: Icon(icon, size: 20),
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+    );
+  }
+}
+
+class _SlaSummaryCard extends StatelessWidget {
+  const _SlaSummaryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Resumen de operación',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const _ProgressRow(
+              label: 'SLA cumplido',
+              value: '92%',
+              progress: 0.92,
+              color: Colors.green,
+            ),
+            const _ProgressRow(
+              label: 'Primera respuesta',
+              value: '7 min',
+              progress: 0.72,
+              color: Colors.blue,
+            ),
+            const _ProgressRow(
+              label: 'Tickets resueltos',
+              value: '78%',
+              progress: 0.78,
+              color: Colors.deepPurple,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Configura reglas y horarios desde Configuración → WhatsApp → SLA.',
+              style: TextStyle(color: Colors.black54),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProgressRow extends StatelessWidget {
+  const _ProgressRow({
+    required this.label,
+    required this.value,
+    required this.progress,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final double progress;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(label)),
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 7),
+          LinearProgressIndicator(
+            value: progress,
+            minHeight: 7,
+            borderRadius: BorderRadius.circular(8),
+            color: color,
+            backgroundColor: color.withValues(alpha: 0.12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DemoClientsPage extends StatelessWidget {
+  const _DemoClientsPage();
+
+  static const _clients = [
+    ('Carlos Rodríguez', 'carlos.rodriguez@email.com', 'Activo', '24 sep 2026'),
+    ('María González', 'maria.gonzalez@email.com', 'Activo', '23 sep 2026'),
+    ('Andrés Martínez', 'andres.martinez@email.com', 'Pendiente', '22 sep 2026'),
+    ('Laura Pérez', 'laura.perez@email.com', 'Activo', '20 sep 2026'),
+    ('Sofía Ramírez', 'sofia.ramirez@email.com', 'Inactivo', '18 sep 2026'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _DemoModeBanner(),
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Directorio de clientes',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.filter_list),
+                      label: const Text('Filtros'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.person_add_alt_1),
+                      label: const Text('Nuevo cliente'),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              for (final client in _clients)
+                ListTile(
+                  leading: CircleAvatar(child: Text(client.$1.substring(0, 1))),
+                  title: Text(client.$1),
+                  subtitle: Text(client.$2),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Chip(
+                        label: Text(client.$3),
+                        visualDensity: VisualDensity.compact,
+                        side: BorderSide.none,
+                      ),
+                      Text(client.$4, style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DemoTicketsPage extends StatelessWidget {
+  const _DemoTicketsPage();
+
+  static const _tickets = [
+    ('#1042', 'Solicitud de soporte técnico', 'Carlos Rodríguez', 'Alta', 'En progreso'),
+    ('#1041', 'Confirmación de cita', 'María González', 'Media', 'Esperando cliente'),
+    ('#1040', 'Actualización de datos', 'Andrés Martínez', 'Baja', 'Nuevo'),
+    ('#1039', 'Falla en el servicio', 'Laura Pérez', 'Alta', 'Resuelto'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _DemoModeBanner(),
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Mesa de servicio',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.view_kanban_outlined),
+                      label: const Text('Vista Kanban'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nuevo ticket'),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              for (final ticket in _tickets)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: ticket.$4 == 'Alta'
+                        ? Colors.red.withValues(alpha: 0.12)
+                        : Colors.blue.withValues(alpha: 0.12),
+                    child: Icon(
+                      Icons.confirmation_number_outlined,
+                      color: ticket.$4 == 'Alta' ? Colors.red : Colors.blue,
+                    ),
+                  ),
+                  title: Text('${ticket.$1} · ${ticket.$2}'),
+                  subtitle: Text('${ticket.$3} · Prioridad ${ticket.$4}'),
+                  trailing: Chip(
+                    label: Text(ticket.$5),
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide.none,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DemoAgendaPage extends StatelessWidget {
+  const _DemoAgendaPage();
+
+  static const _appointments = [
+    ('09:00', 'Seguimiento de servicio', 'Carlos Rodríguez', 'Confirmada'),
+    ('11:30', 'Consulta inicial', 'María González', 'Confirmada'),
+    ('15:00', 'Revisión de ticket #1042', 'Andrés Martínez', 'Pendiente'),
+    ('16:30', 'Llamada de renovación', 'Laura Pérez', 'Pendiente'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _DemoModeBanner(),
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Agenda de hoy · 24 de septiembre',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nueva cita'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                for (final appointment in _appointments)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    elevation: 0,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    child: ListTile(
+                      leading: Text(
+                        appointment.$1,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      title: Text(appointment.$2),
+                      subtitle: Text(appointment.$3),
+                      trailing: Chip(
+                        label: Text(appointment.$4),
+                        visualDensity: VisualDensity.compact,
+                        side: BorderSide.none,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DemoReportsPage extends StatelessWidget {
+  const _DemoReportsPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _DemoModeBanner(),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Expanded(
+              child: _ReportCard(
+                title: 'Conversaciones por canal',
+                icon: Icons.forum_outlined,
+                values: [('WhatsApp', '68%', Colors.green), ('Correo', '20%', Colors.blue), ('Portal', '12%', Colors.deepPurple)],
+              ),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(
+              child: _ReportCard(
+                title: 'Tickets por estado',
+                icon: Icons.confirmation_number_outlined,
+                values: [('Resueltos', '58%', Colors.green), ('En progreso', '27%', Colors.orange), ('Nuevos', '15%', Colors.blue)],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.download_outlined),
+            title: const Text('Exportar reportes'),
+            subtitle: const Text('Genera informes CSV o PDF para tu equipo.'),
+            trailing: OutlinedButton(
+              onPressed: null,
+              child: const Text('Próximamente'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReportCard extends StatelessWidget {
+  const _ReportCard({
+    required this.title,
+    required this.icon,
+    required this.values,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<(String, String, Color)> values;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              ],
+            ),
+            const SizedBox(height: 18),
+            for (final value in values)
+              _ProgressRow(
+                label: value.$1,
+                value: value.$2,
+                progress: double.parse(value.$2.replaceAll('%', '')) / 100,
+                color: value.$3,
+              ),
+          ],
         ),
       ),
     );
