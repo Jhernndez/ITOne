@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -3827,6 +3829,8 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                           : _settingsTab == 2
                           ? _IntegrationsSettings(
                               tenantId: widget.tenant['id'] as String,
+                              onOpenWhatsAppTab: () =>
+                                  setState(() => _settingsTab = 3),
                             )
                           : _settingsTab == 3
                           ? _WhatsAppSettings(
@@ -3938,9 +3942,13 @@ class _RegionalSettings extends StatelessWidget {
 }
 
 class _IntegrationsSettings extends StatefulWidget {
-  const _IntegrationsSettings({required this.tenantId});
+  const _IntegrationsSettings({
+    required this.tenantId,
+    this.onOpenWhatsAppTab,
+  });
 
   final String tenantId;
+  final VoidCallback? onOpenWhatsAppTab;
 
   @override
   State<_IntegrationsSettings> createState() => _IntegrationsSettingsState();
@@ -3951,18 +3959,39 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
   Map<String, List<Map<String, dynamic>>> _resourcesByIntegration = {};
   bool _loading = true;
   String? _message;
+  String? _whatsappStatus;
+  String? _busyIntegrationId;
 
   @override
   void initState() {
     super.initState();
     _loadApiIntegrations();
+    _loadWhatsAppStatus();
+  }
+
+  Future<void> _loadWhatsAppStatus() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_integrations')
+          .select('status')
+          .eq('tenant_id', widget.tenantId)
+          .eq('provider', 'whatsapp')
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _whatsappStatus = row?['status'] as String?);
+      }
+    } on PostgrestException {
+      // Non-blocking: the card simply keeps its default "not configured" state.
+    }
   }
 
   Future<void> _loadApiIntegrations() async {
     try {
       final rows = await Supabase.instance.client
           .from('tenant_api_integrations')
-          .select('id, name, base_url, auth_type, enabled, tenant_api_resources(id, name, path, http_method, enabled)')
+          .select(
+            'id, name, base_url, auth_type, enabled, tenant_api_resources(id, name, path, http_method, enabled)',
+          )
           .eq('tenant_id', widget.tenantId)
           .order('name');
       if (mounted) {
@@ -3972,9 +4001,14 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
               .toList();
           _resourcesByIntegration = {
             for (final integration in _apiIntegrations)
-              integration['id'] as String: ((integration['tenant_api_resources'] as List?) ?? const [])
-                  .map((resource) => Map<String, dynamic>.from(resource as Map))
-                  .toList(),
+              integration['id'] as String:
+                  ((integration['tenant_api_resources'] as List?) ?? const [])
+                      .map(
+                        (resource) => Map<String, dynamic>.from(
+                          resource as Map,
+                        ),
+                      )
+                      .toList(),
           };
           _loading = false;
         });
@@ -3989,72 +4023,275 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
     }
   }
 
-  Future<void> _addIntegration() async {
-    final nameController = TextEditingController();
-    final urlController = TextEditingController();
+  String _authTypeLabel(String authType) {
+    switch (authType) {
+      case 'api_key':
+        return 'API Key';
+      case 'bearer_token':
+        return 'Bearer Token';
+      case 'basic':
+        return 'Usuario y contraseña';
+      default:
+        return 'Sin autenticación';
+    }
+  }
+
+  Future<void> _openIntegrationDialog({Map<String, dynamic>? integration}) async {
+    final isEditing = integration != null;
+    final nameController = TextEditingController(
+      text: integration?['name'] as String? ?? '',
+    );
+    final urlController = TextEditingController(
+      text: integration?['base_url'] as String? ?? '',
+    );
+    final headerNameController = TextEditingController(text: 'X-API-Key');
+    final headerValueController = TextEditingController();
+    final tokenController = TextEditingController();
+    final usernameController = TextEditingController();
+    final passwordController = TextEditingController();
+    String authType = integration?['auth_type'] as String? ?? 'none';
+    String? dialogError;
+
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Agregar API interna'),
-        content: SizedBox(
-          width: 430,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre',
-                  hintText: 'Calendario corporativo',
-                ),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(isEditing ? 'Editar API interna' : 'Agregar API interna'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre',
+                      hintText: 'Calendario corporativo',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: urlController,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'URL base (https://)',
+                      hintText: 'https://intranet.empresa.com/api',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: authType,
+                    decoration: const InputDecoration(
+                      labelText: 'Autenticación',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'none',
+                        child: Text('Sin autenticación'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'api_key',
+                        child: Text('API Key (header)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'bearer_token',
+                        child: Text('Bearer Token'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'basic',
+                        child: Text('Usuario y contraseña (Basic Auth)'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => authType = value);
+                      }
+                    },
+                  ),
+                  if (isEditing) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Deja los campos de credenciales en blanco para mantener el valor actual.',
+                      style: Theme.of(dialogContext).textTheme.bodySmall,
+                    ),
+                  ],
+                  if (authType == 'api_key') ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: headerNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre del header',
+                        hintText: 'X-API-Key',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: headerValueController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Valor de la API Key',
+                      ),
+                    ),
+                  ],
+                  if (authType == 'bearer_token') ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: tokenController,
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: 'Token'),
+                    ),
+                  ],
+                  if (authType == 'basic') ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: usernameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Usuario',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Contraseña',
+                      ),
+                    ),
+                  ],
+                  if (dialogError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      dialogError!,
+                      style: TextStyle(
+                        color: Theme.of(dialogContext).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: urlController,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'URL base',
-                  hintText: 'https://intranet.empresa.com/api',
-                ),
-              ),
-            ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+                final baseUrl = urlController.text.trim();
+                if (name.isEmpty || baseUrl.isEmpty) {
+                  setDialogState(
+                    () => dialogError = 'Nombre y URL base son obligatorios.',
+                  );
+                  return;
+                }
+                if (!baseUrl.startsWith('https://')) {
+                  setDialogState(
+                    () => dialogError = 'La URL base debe iniciar con https://',
+                  );
+                  return;
+                }
+                Navigator.pop(dialogContext, true);
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Guardar'),
-          ),
-        ],
       ),
     );
+
     if (result != true) {
-      nameController.dispose();
-      urlController.dispose();
+      for (final controller in [
+        nameController,
+        urlController,
+        headerNameController,
+        headerValueController,
+        tokenController,
+        usernameController,
+        passwordController,
+      ]) {
+        controller.dispose();
+      }
       return;
+    }
+
+    Map<String, dynamic> authConfig;
+    switch (authType) {
+      case 'api_key':
+        authConfig = {
+          'header_name': headerNameController.text.trim(),
+          'header_value': headerValueController.text,
+        };
+        break;
+      case 'bearer_token':
+        authConfig = {'token': tokenController.text};
+        break;
+      case 'basic':
+        authConfig = {
+          'username': usernameController.text,
+          'password': passwordController.text,
+        };
+        break;
+      default:
+        authConfig = {};
     }
     final name = nameController.text.trim();
     final baseUrl = urlController.text.trim();
-    nameController.dispose();
-    urlController.dispose();
-    if (name.isEmpty || baseUrl.isEmpty) {
-      setState(() => _message = 'Nombre y URL base son obligatorios.');
-      return;
+    for (final controller in [
+      nameController,
+      urlController,
+      headerNameController,
+      headerValueController,
+      tokenController,
+      usernameController,
+      passwordController,
+    ]) {
+      controller.dispose();
     }
+
+    setState(() => _message = null);
     try {
-      await Supabase.instance.client.from('tenant_api_integrations').insert({
-        'tenant_id': widget.tenantId,
-        'name': name,
-        'base_url': baseUrl,
-        'auth_type': 'none',
-      });
+      final response = await Supabase.instance.client.functions.invoke(
+        'manage-internal-api',
+        body: {
+          'action': 'upsert_integration',
+          'tenant_id': widget.tenantId,
+          if (isEditing) 'integration_id': integration['id'],
+          'name': name,
+          'base_url': baseUrl,
+          'auth_type': authType,
+          'auth_config': authConfig,
+        },
+      );
+      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
+      if (data['ok'] != true) {
+        if (mounted) {
+          setState(
+            () => _message = data['error'] as String? ?? 'No fue posible guardar la API.',
+          );
+        }
+        return;
+      }
       await _loadApiIntegrations();
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _message = error.message);
+      if (mounted) {
+        setState(
+          () => _message = isEditing
+              ? 'Integración actualizada correctamente.'
+              : 'Integración creada correctamente.',
+        );
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        final errorMessage = details is Map ? details['error'] : null;
+        setState(
+          () => _message =
+              'No fue posible guardar la API: ${errorMessage ?? error.reasonPhrase}',
+        );
+      }
     }
   }
 
@@ -4071,91 +4308,273 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
     }
   }
 
+  Future<void> _testConnection(String integrationId) async {
+    setState(() {
+      _busyIntegrationId = integrationId;
+      _message = null;
+    });
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'manage-internal-api',
+        body: {
+          'action': 'test_connection',
+          'tenant_id': widget.tenantId,
+          'integration_id': integrationId,
+        },
+      );
+      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
+      if (mounted) {
+        setState(
+          () => _message = data['message'] as String? ??
+              (data['ok'] == true ? 'Conexión exitosa.' : 'No fue posible conectar.'),
+        );
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        final errorMessage = details is Map ? details['error'] : null;
+        setState(
+          () => _message =
+              'No fue posible probar la conexión: ${errorMessage ?? error.reasonPhrase}',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyIntegrationId = null);
+    }
+  }
+
   Future<void> _addResource(String integrationId) async {
-      final nameController = TextEditingController();
-      final pathController = TextEditingController();
-      String method = 'GET';
-      final result = await showDialog<bool>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Agregar recurso API'),
-            content: SizedBox(
-              width: 430,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nombre',
-                      hintText: 'Citas',
-                    ),
+    final nameController = TextEditingController();
+    final pathController = TextEditingController();
+    String method = 'GET';
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Agregar recurso API'),
+          content: SizedBox(
+            width: 430,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre',
+                    hintText: 'Citas',
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: pathController,
-                    decoration: const InputDecoration(
-                      labelText: 'Ruta',
-                      hintText: '/appointments',
-                    ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: pathController,
+                  decoration: const InputDecoration(
+                    labelText: 'Ruta',
+                    hintText: '/appointments',
                   ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: method,
-                    decoration: const InputDecoration(labelText: 'Método HTTP'),
-                    items: const ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-                        .map((value) => DropdownMenuItem(value: value, child: Text(value)))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) setDialogState(() => method = value);
-                    },
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: method,
+                  decoration: const InputDecoration(labelText: 'Método HTTP'),
+                  items: const ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setDialogState(() => method = value);
+                  },
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancelar'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final name = nameController.text.trim();
+    final path = pathController.text.trim();
+    nameController.dispose();
+    pathController.dispose();
+    if (result != true || name.isEmpty || path.isEmpty) return;
+    try {
+      await Supabase.instance.client.from('tenant_api_resources').insert({
+        'tenant_id': widget.tenantId,
+        'integration_id': integrationId,
+        'name': name,
+        'path': path.startsWith('/') ? path : '/$path',
+        'http_method': method,
+      });
+      await _loadApiIntegrations();
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    }
+  }
+
+  Future<void> _deleteResource(String id) async {
+    try {
+      await Supabase.instance.client
+          .from('tenant_api_resources')
+          .delete()
+          .eq('id', id)
+          .eq('tenant_id', widget.tenantId);
+      await _loadApiIntegrations();
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    }
+  }
+
+  Future<void> _executeResource({
+    required String integrationId,
+    required Map<String, dynamic> resource,
+  }) async {
+    final method = resource['http_method'] as String;
+    final needsBody = ['POST', 'PUT', 'PATCH'].contains(method);
+    final queryController = TextEditingController();
+    final bodyController = TextEditingController();
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Ejecutar ${resource['name']} ($method)'),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Parámetros de consulta opcionales, en formato JSON.',
+                style: Theme.of(dialogContext).textTheme.bodySmall,
               ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Guardar'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: queryController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Query params (JSON)',
+                  hintText: '{"desde": "2026-01-01"}',
+                  border: OutlineInputBorder(),
+                ),
               ),
+              if (needsBody) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: bodyController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Cuerpo (JSON)',
+                    hintText: '{"titulo": "Cita de seguimiento"}',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
-      );
-      final name = nameController.text.trim();
-      final path = pathController.text.trim();
-      nameController.dispose();
-      pathController.dispose();
-      if (result != true || name.isEmpty || path.isEmpty) return;
-      try {
-        await Supabase.instance.client.from('tenant_api_resources').insert({
-          'tenant_id': widget.tenantId,
-          'integration_id': integrationId,
-          'name': name,
-          'path': path.startsWith('/') ? path : '/$path',
-          'http_method': method,
-        });
-        await _loadApiIntegrations();
-      } on PostgrestException catch (error) {
-        if (mounted) setState(() => _message = error.message);
-      }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Ejecutar'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true) {
+      queryController.dispose();
+      bodyController.dispose();
+      return;
     }
 
-  Future<void> _deleteResource(String id) async {
-      try {
-        await Supabase.instance.client
-            .from('tenant_api_resources')
-            .delete()
-            .eq('id', id)
-            .eq('tenant_id', widget.tenantId);
-        await _loadApiIntegrations();
-      } on PostgrestException catch (error) {
-        if (mounted) setState(() => _message = error.message);
+    Map<String, dynamic> query = {};
+    Map<String, dynamic>? bodyPayload;
+    try {
+      if (queryController.text.trim().isNotEmpty) {
+        query = Map<String, dynamic>.from(
+          jsonDecode(queryController.text.trim()) as Map,
+        );
+      }
+      if (needsBody && bodyController.text.trim().isNotEmpty) {
+        bodyPayload = Map<String, dynamic>.from(
+          jsonDecode(bodyController.text.trim()) as Map,
+        );
+      }
+    } catch (_) {
+      queryController.dispose();
+      bodyController.dispose();
+      if (mounted) {
+        setState(() => _message = 'El JSON ingresado no es válido.');
+      }
+      return;
+    }
+    queryController.dispose();
+    bodyController.dispose();
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'manage-internal-api',
+        body: {
+          'action': 'execute_resource',
+          'tenant_id': widget.tenantId,
+          'integration_id': integrationId,
+          'resource_id': resource['id'],
+          'query': query,
+          'body': ?bodyPayload,
+        },
+      );
+      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (resultContext) => AlertDialog(
+          title: Text(
+            data['ok'] == true
+                ? 'Respuesta exitosa (${data['status_code']})'
+                : 'Respuesta con error (${data['status_code'] ?? '-'})',
+          ),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Text(
+                (data['response_preview'] as String?) ??
+                    (data['message'] as String?) ??
+                    'Sin respuesta.',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(resultContext),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        final errorMessage = details is Map ? details['error'] : null;
+        setState(
+          () => _message =
+              'No fue posible ejecutar el recurso: ${errorMessage ?? error.reasonPhrase}',
+        );
+      }
     }
   }
 
@@ -4166,21 +4585,35 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
         'WhatsApp Business',
         'Mensajería y atención por WhatsApp Cloud API.',
         Icons.chat_outlined,
+        _integrationStatusLabel(_whatsappStatus ?? 'not_configured'),
+        widget.onOpenWhatsAppTab,
       ),
       (
         'Microsoft 365',
         'Calendarios, usuarios y servicios de Microsoft.',
         Icons.business_center_outlined,
+        'Próximamente',
+        () => _showComingSoonDialog(
+          'Microsoft 365',
+          'La conexión OAuth con Microsoft 365 (calendarios, correo y Teams) está en el roadmap técnico. Mientras tanto puedes registrar cualquier API interna de tu compañía en la sección de abajo.',
+        ),
       ),
       (
         'Google Workspace',
         'Calendario, contactos y servicios de Google.',
         Icons.public,
+        'Próximamente',
+        () => _showComingSoonDialog(
+          'Google Workspace',
+          'La conexión OAuth con Google Workspace (Calendar, Contacts) está en el roadmap técnico. Mientras tanto puedes registrar cualquier API interna de tu compañía en la sección de abajo.',
+        ),
       ),
       (
         'API privada',
         'Conecta una plataforma propia mediante API y webhooks.',
         Icons.api_outlined,
+        _apiIntegrations.isEmpty ? 'No configurada' : 'Configurada',
+        () => _openIntegrationDialog(),
       ),
     ];
     return ListView(
@@ -4199,7 +4632,11 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
               leading: Icon(integration.$3),
               title: Text(integration.$1),
               subtitle: Text(integration.$2),
-              trailing: const Chip(label: Text('No configurada')),
+              trailing: TextButton(
+                onPressed: integration.$5,
+                child: Chip(label: Text(integration.$4)),
+              ),
+              onTap: integration.$5,
             ),
           ),
         ),
@@ -4215,7 +4652,7 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
               ),
             ),
             FilledButton.icon(
-              onPressed: _addIntegration,
+              onPressed: () => _openIntegrationDialog(),
               icon: const Icon(Icons.add),
               label: const Text('Agregar API'),
             ),
@@ -4223,7 +4660,10 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
         ),
         const SizedBox(height: 10),
         if (_message != null)
-          Text(_message!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          Text(
+            _message!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         if (_loading)
           const Center(child: CircularProgressIndicator())
         else if (_apiIntegrations.isEmpty)
@@ -4239,55 +4679,124 @@ class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
         else
           ..._apiIntegrations.map(
             (integration) => Card(
-              child: ListTile(
-                leading: const Icon(Icons.api_outlined),
-                title: Text(integration['name'] as String),
-                subtitle: Text(
-                  '${integration['base_url']} · Autenticación: ${integration['auth_type']}',
-                ),
-                trailing: Wrap(
-                  spacing: 4,
-                  children: [
-                    IconButton(
-                      tooltip: 'Agregar recurso',
-                      onPressed: () => _addResource(integration['id'] as String),
-                      icon: const Icon(Icons.route_outlined),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.api_outlined),
+                    title: Text(integration['name'] as String),
+                    subtitle: Text(
+                      '${integration['base_url']} · Autenticación: '
+                      '${_authTypeLabel(integration['auth_type'] as String? ?? 'none')}',
                     ),
-                    IconButton(
-                      tooltip: 'Eliminar integración',
-                      onPressed: () => _deleteIntegration(integration['id'] as String),
-                      icon: const Icon(Icons.delete_outline),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        _busyIntegrationId == integration['id']
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                tooltip: 'Probar conexión',
+                                onPressed: () =>
+                                    _testConnection(integration['id'] as String),
+                                icon: const Icon(Icons.wifi_tethering),
+                              ),
+                        IconButton(
+                          tooltip: 'Editar',
+                          onPressed: () => _openIntegrationDialog(
+                            integration: integration,
+                          ),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          tooltip: 'Agregar recurso',
+                          onPressed: () =>
+                              _addResource(integration['id'] as String),
+                          icon: const Icon(Icons.route_outlined),
+                        ),
+                        IconButton(
+                          tooltip: 'Eliminar integración',
+                          onPressed: () =>
+                              _deleteIntegration(integration['id'] as String),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  if ((_resourcesByIntegration[integration['id'] as String] ??
+                          [])
+                      .isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: 16,
+                        right: 8,
+                        bottom: 8,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(height: 1),
+                          for (final resource
+                              in _resourcesByIntegration[integration['id']
+                                      as String] ??
+                                  [])
+                            ListTile(
+                              dense: true,
+                              title: Text(resource['name'] as String),
+                              subtitle: Text(
+                                '${resource['http_method']} ${resource['path']}',
+                              ),
+                              trailing: Wrap(
+                                spacing: 4,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Ejecutar',
+                                    onPressed: () => _executeResource(
+                                      integrationId: integration['id'] as String,
+                                      resource: resource,
+                                    ),
+                                    icon: const Icon(Icons.play_arrow_outlined),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Eliminar recurso',
+                                    onPressed: () =>
+                                        _deleteResource(resource['id'] as String),
+                                    icon: const Icon(Icons.delete_outline),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
-        if (_apiIntegrations.isNotEmpty)
-          for (final integration in _apiIntegrations)
-            if ((_resourcesByIntegration[integration['id'] as String] ?? []).isNotEmpty)
-              Card(
-                margin: const EdgeInsets.only(top: 4),
-                child: ExpansionTile(
-                  leading: const Icon(Icons.route_outlined),
-                  title: Text('Recursos de ${integration['name']}'),
-                  children: [
-                    for (final resource
-                        in _resourcesByIntegration[integration['id'] as String] ?? [])
-                      ListTile(
-                        dense: true,
-                        title: Text(resource['name'] as String),
-                        subtitle: Text('${resource['http_method']} ${resource['path']}'),
-                        trailing: IconButton(
-                          tooltip: 'Eliminar recurso',
-                          onPressed: () => _deleteResource(resource['id'] as String),
-                          icon: const Icon(Icons.delete_outline),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
       ],
+    );
+  }
+
+  void _showComingSoonDialog(String title, String message) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
     );
   }
 }
