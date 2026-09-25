@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'services/browser_notifications.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -1911,9 +1912,76 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   int _selectedIndex = 0;
   bool _sidebarCollapsed = false;
   String _presence = 'available';
+  List<Map<String, dynamic>> _notifications = [];
+  RealtimeChannel? _notificationsChannel;
   late final Future<List<Map<String, dynamic>>> _memberships =
       _loadMemberships();
   late final Future<Map<String, dynamic>?> _profile = _loadProfile();
+
+  SupabaseClient get _client => Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+    _subscribeToNotifications();
+  }
+
+  @override
+  void dispose() {
+    final channel = _notificationsChannel;
+    if (channel != null) _client.removeChannel(channel);
+    super.dispose();
+  }
+
+  Future<void> _loadNotifications() async {
+    try {
+      final rows = await _client
+          .from('notifications')
+          .select('id, type, title, body, data, read_at, created_at')
+          .eq('tenant_id', _activeMembership['tenant_id'])
+          .eq('recipient_user_id', _client.auth.currentUser!.id)
+          .order('created_at', ascending: false)
+          .limit(30);
+      if (mounted) {
+        setState(() {
+          _notifications = (rows as List)
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+        });
+      }
+    } on PostgrestException {
+      // Notifications are optional and must not block the workspace.
+    }
+  }
+
+  void _subscribeToNotifications() {
+    _notificationsChannel = _client
+        .channel('tenant-notifications-${_activeMembership['tenant_id']}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'recipient_user_id',
+            value: _client.auth.currentUser?.id,
+          ),
+          callback: (payload) {
+            final notification = Map<String, dynamic>.from(payload.newRecord);
+            if (!mounted) return;
+            setState(() => _notifications = [
+              notification,
+              ..._notifications,
+            ]);
+            BrowserNotifications.show(
+              title: notification['title'] as String? ?? 'ITONE',
+              body: notification['body'] as String? ?? '',
+            );
+          },
+        )
+        .subscribe();
+  }
 
   Future<Map<String, dynamic>?> _loadProfile() async {
     final user = Supabase.instance.client.auth.currentUser;
@@ -2039,6 +2107,18 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
                   );
                 }).toList(),
               );
+            },
+          ),
+          _NotificationBell(
+            notifications: _notifications,
+            onRefresh: _loadNotifications,
+            onRequestPermission: BrowserNotifications.requestPermission,
+            onMarkRead: (notification) async {
+              await _client
+                  .from('notifications')
+                  .update({'read_at': DateTime.now().toUtc().toIso8601String()})
+                  .eq('id', notification['id']);
+              await _loadNotifications();
             },
           ),
           FutureBuilder<Map<String, dynamic>?>(
@@ -2929,6 +3009,104 @@ class _ReportCard extends StatelessWidget {
   }
 }
 
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({
+    required this.notifications,
+    required this.onRefresh,
+    required this.onRequestPermission,
+    required this.onMarkRead,
+  });
+
+  final List<Map<String, dynamic>> notifications;
+  final Future<void> Function() onRefresh;
+  final Future<bool> Function() onRequestPermission;
+  final Future<void> Function(Map<String, dynamic>) onMarkRead;
+
+  @override
+  Widget build(BuildContext context) {
+    final unread = notifications.where((item) => item['read_at'] == null).length;
+    return PopupMenuButton<void>(
+      tooltip: 'Notificaciones',
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        label: Text(unread > 99 ? '99+' : '$unread'),
+        child: const Icon(Icons.notifications_none_outlined),
+      ),
+      itemBuilder: (context) => [
+        PopupMenuItem<void>(
+          enabled: false,
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Notificaciones',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Actualizar',
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh, size: 18),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<void>(
+          enabled: false,
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              final granted = await onRequestPermission();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      granted
+                          ? 'Notificaciones del navegador activadas.'
+                          : 'No se concedió el permiso del navegador.',
+                    ),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.web),
+            label: const Text('Activar notificaciones del navegador'),
+          ),
+        ),
+        if (notifications.isEmpty)
+          const PopupMenuItem<void>(
+            enabled: false,
+            child: Text('No tienes notificaciones nuevas.'),
+          ),
+        for (final notification in notifications.take(8))
+          PopupMenuItem<void>(
+            onTap: () => onMarkRead(notification),
+            child: SizedBox(
+              width: 350,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  notification['read_at'] == null
+                      ? Icons.circle
+                      : Icons.circle_outlined,
+                  size: 12,
+                  color: notification['read_at'] == null
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.black38,
+                ),
+                title: Text(notification['title'] as String? ?? 'ITONE'),
+                subtitle: Text(
+                  notification['body'] as String? ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _UserPresenceMenu extends StatelessWidget {
   const _UserPresenceMenu({
     required this.profile,
@@ -3526,6 +3704,11 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                         'Bienvenida y automatizaciones',
                         Icons.chat_outlined,
                       ),
+                      (
+                        'Notificaciones',
+                        'Alertas y tiempos de respuesta',
+                        Icons.notifications_outlined,
+                      ),
                     ])
                       ListTile(
                         selected:
@@ -3547,6 +3730,11 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                                 'Bienvenida y automatizaciones',
                                 Icons.chat_outlined,
                               ),
+                              (
+                                'Notificaciones',
+                                'Alertas y tiempos de respuesta',
+                                Icons.notifications_outlined,
+                              ),
                             ].indexOf(item),
                         leading: Icon(item.$3),
                         title: Text(item.$1),
@@ -3564,6 +3752,11 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                               'WhatsApp',
                               'Bienvenida y automatizaciones',
                               Icons.chat_outlined,
+                            ),
+                            (
+                              'Notificaciones',
+                              'Alertas y tiempos de respuesta',
+                              Icons.notifications_outlined,
                             ),
                           ].indexOf(item),
                         ),
@@ -3632,8 +3825,14 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                               onSave: _saveRegional,
                             )
                           : _settingsTab == 2
-                          ? const _IntegrationsSettings()
-                          : _WhatsAppSettings(
+                          ? _IntegrationsSettings(
+                              tenantId: widget.tenant['id'] as String,
+                            )
+                          : _settingsTab == 3
+                          ? _WhatsAppSettings(
+                              tenantId: widget.tenant['id'] as String,
+                            )
+                          : _TenantNotificationSettings(
                               tenantId: widget.tenant['id'] as String,
                             ),
                     ),
@@ -3738,8 +3937,132 @@ class _RegionalSettings extends StatelessWidget {
   }
 }
 
-class _IntegrationsSettings extends StatelessWidget {
-  const _IntegrationsSettings();
+class _IntegrationsSettings extends StatefulWidget {
+  const _IntegrationsSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_IntegrationsSettings> createState() => _IntegrationsSettingsState();
+}
+
+class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
+  List<Map<String, dynamic>> _apiIntegrations = [];
+  bool _loading = true;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApiIntegrations();
+  }
+
+  Future<void> _loadApiIntegrations() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('tenant_api_integrations')
+          .select('id, name, base_url, auth_type, enabled')
+          .eq('tenant_id', widget.tenantId)
+          .order('name');
+      if (mounted) {
+        setState(() {
+          _apiIntegrations = (rows as List)
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+          _loading = false;
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.message;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _addIntegration() async {
+    final nameController = TextEditingController();
+    final urlController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Agregar API interna'),
+        content: SizedBox(
+          width: 430,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre',
+                  hintText: 'Calendario corporativo',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: urlController,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'URL base',
+                  hintText: 'https://intranet.empresa.com/api',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (result != true) {
+      nameController.dispose();
+      urlController.dispose();
+      return;
+    }
+    final name = nameController.text.trim();
+    final baseUrl = urlController.text.trim();
+    nameController.dispose();
+    urlController.dispose();
+    if (name.isEmpty || baseUrl.isEmpty) {
+      setState(() => _message = 'Nombre y URL base son obligatorios.');
+      return;
+    }
+    try {
+      await Supabase.instance.client.from('tenant_api_integrations').insert({
+        'tenant_id': widget.tenantId,
+        'name': name,
+        'base_url': baseUrl,
+        'auth_type': 'none',
+      });
+      await _loadApiIntegrations();
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    }
+  }
+
+  Future<void> _deleteIntegration(String id) async {
+    try {
+      await Supabase.instance.client
+          .from('tenant_api_integrations')
+          .delete()
+          .eq('id', id)
+          .eq('tenant_id', widget.tenantId);
+      await _loadApiIntegrations();
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3783,6 +4106,193 @@ class _IntegrationsSettings extends StatelessWidget {
               subtitle: Text(integration.$2),
               trailing: const Chip(label: Text('No configurada')),
             ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'APIs internas de la compañía',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: _addIntegration,
+              icon: const Icon(Icons.add),
+              label: const Text('Agregar API'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (_message != null)
+          Text(_message!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        if (_loading)
+          const Center(child: CircularProgressIndicator())
+        else if (_apiIntegrations.isEmpty)
+          const Card(
+            child: ListTile(
+              leading: Icon(Icons.api_outlined),
+              title: Text('No hay APIs internas configuradas'),
+              subtitle: Text(
+                'Agrega la API del calendario, ERP, CRM u otra aplicación interna.',
+              ),
+            ),
+          )
+        else
+          ..._apiIntegrations.map(
+            (integration) => Card(
+              child: ListTile(
+                leading: const Icon(Icons.api_outlined),
+                title: Text(integration['name'] as String),
+                subtitle: Text(
+                  '${integration['base_url']} · Autenticación: ${integration['auth_type']}',
+                ),
+                trailing: IconButton(
+                  tooltip: 'Eliminar integración',
+                  onPressed: () => _deleteIntegration(integration['id'] as String),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TenantNotificationSettings extends StatefulWidget {
+  const _TenantNotificationSettings({required this.tenantId});
+
+  final String tenantId;
+
+  @override
+  State<_TenantNotificationSettings> createState() =>
+      _TenantNotificationSettingsState();
+}
+
+class _TenantNotificationSettingsState
+    extends State<_TenantNotificationSettings> {
+  bool _browserEnabled = true;
+  bool _emailEnabled = true;
+  double _thresholdMinutes = 15;
+  bool _loading = true;
+  bool _saving = false;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('tenant_notification_settings')
+          .select()
+          .eq('tenant_id', widget.tenantId)
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (!mounted) return;
+      if (row != null) {
+        setState(() {
+          _browserEnabled = row['browser_notifications_enabled'] as bool? ?? true;
+          _emailEnabled = row['email_notifications_enabled'] as bool? ?? true;
+          _thresholdMinutes =
+              (row['unanswered_chat_threshold_minutes'] as num?)?.toDouble() ??
+              15;
+        });
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    setState(() {
+      _saving = true;
+      _message = null;
+    });
+    try {
+      await Supabase.instance.client
+          .from('tenant_notification_settings')
+          .upsert({
+            'tenant_id': widget.tenantId,
+            'user_id': userId,
+            'browser_notifications_enabled': _browserEnabled,
+            'email_notifications_enabled': _emailEnabled,
+            'unanswered_chat_threshold_minutes': _thresholdMinutes.round(),
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          });
+      if (mounted) setState(() => _message = 'Preferencias de notificación guardadas.');
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(
+          'Notificaciones y alertas',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Configura qué alertas recibe cada usuario y cuándo avisar sobre chats sin respuesta.',
+        ),
+        const SizedBox(height: 20),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Notificaciones del navegador'),
+          subtitle: const Text('Muestra alertas aunque ITONE esté en otra pestaña.'),
+          value: _browserEnabled,
+          onChanged: (value) => setState(() => _browserEnabled = value),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Notificaciones por correo'),
+          subtitle: const Text('Preparado para alertas operativas por correo.'),
+          value: _emailEnabled,
+          onChanged: (value) => setState(() => _emailEnabled = value),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Avisar si un chat permanece sin respuesta: '
+          '${_thresholdMinutes.round()} minutos',
+        ),
+        Slider(
+          value: _thresholdMinutes,
+          min: 5,
+          max: 120,
+          divisions: 23,
+          label: '${_thresholdMinutes.round()} min',
+          onChanged: (value) => setState(() => _thresholdMinutes = value),
+        ),
+        const SizedBox(height: 12),
+        if (_message != null)
+          Text(_message!, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(_saving ? 'Guardando...' : 'Guardar preferencias'),
           ),
         ),
       ],
