@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/browser_notifications.dart';
+import 'services/whatsapp_signup.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -4965,7 +4966,7 @@ class _WhatsAppSettings extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                _WhatsAppIntegrationPanel(tenantId: tenantId),
+                _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId),
                 _WhatsAppWelcomeSettings(tenantId: tenantId),
                 _WhatsAppFlowSettings(tenantId: tenantId),
                 _WhatsAppSlaSettings(tenantId: tenantId),
@@ -4985,7 +4986,7 @@ class _WhatsAppSettings extends StatelessWidget {
 }
 
 class _WhatsAppIntegrationPanel extends StatefulWidget {
-  const _WhatsAppIntegrationPanel({required this.tenantId});
+  const _WhatsAppIntegrationPanel({super.key, required this.tenantId});
 
   final String tenantId;
 
@@ -5002,8 +5003,13 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   bool _loading = true;
   bool _saving = false;
   bool _validating = false;
-  bool _registering = false;
-  bool _editing = false;
+  bool _sdkReady = false;
+  String? _configId;
+  String? _setupError;
+  String _onboardingMode = 'cloud_api';
+  String _historyStatus = 'not_requested';
+  int _historyProgress = 0;
+  String? _historyError;
   String _status = 'not_configured';
   String? _message;
   List<Map<String, dynamic>> _blockedEntities = [];
@@ -5042,50 +5048,85 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         _phoneController.text =
             metadata['display_phone_number'] as String? ?? '';
         _nameController.text = metadata['name'] as String? ?? '';
+        _onboardingMode = metadata['onboarding_mode'] as String? ?? 'cloud_api';
+        final account = await Supabase.instance.client
+            .from('whatsapp_accounts')
+            .select('history_sync_status, history_sync_progress, history_sync_error')
+            .eq('tenant_id', widget.tenantId)
+            .eq('phone_number_id', _phoneIdController.text)
+            .maybeSingle();
+        if (account != null) {
+          _historyStatus = account['history_sync_status'] as String;
+          _historyProgress = account['history_sync_progress'] as int;
+          _historyError = account['history_sync_error'] as String?;
+        }
       }
     } on PostgrestException catch (error) {
       _message = error.message;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+    if (!WhatsAppSignup.supported || !mounted) return;
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'connect-whatsapp-coexistence',
+        body: {'tenant_id': widget.tenantId, 'action': 'configuration'},
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      await WhatsAppSignup.prepare(
+        data['app_id'] as String,
+        data['graph_version'] as String,
+      );
+      if (mounted) {
+        setState(() {
+          _configId = data['config_id'] as String;
+          _sdkReady = true;
+          _setupError = null;
+        });
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        setState(() => _setupError =
+            details is Map ? details['error']?.toString() : error.reasonPhrase);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _setupError = 'No se pudo preparar Meta: $error');
+    }
   }
 
-  Future<void> _save() async {
-    if (_businessIdController.text.trim().isEmpty ||
-        _phoneIdController.text.trim().isEmpty) {
-      setState(
-        () => _message =
-            'Business Account ID y Phone Number ID son obligatorios.',
-      );
-      return;
-    }
-
+  Future<void> _connectCoexistence() async {
+    if (_saving || !_sdkReady || _configId == null) return;
     setState(() {
       _saving = true;
       _message = null;
     });
     try {
-      await Supabase.instance.client.from('tenant_integrations').upsert({
-        'tenant_id': widget.tenantId,
-        'provider': 'whatsapp',
-        'status': 'configuring',
-        'metadata': {
-          'business_account_id': _businessIdController.text.trim(),
-          'phone_number_id': _phoneIdController.text.trim(),
-          'display_phone_number': _phoneController.text.trim(),
-          'name': _nameController.text.trim(),
+      final signup = jsonDecode(await WhatsAppSignup.connect(_configId!));
+      if (!mounted) return;
+      final response = await Supabase.instance.client.functions.invoke(
+        'connect-whatsapp-coexistence',
+        body: {
+          'tenant_id': widget.tenantId,
+          ...Map<String, dynamic>.from(signup as Map),
         },
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'tenant_id,provider');
-      if (mounted) {
-        setState(() {
-          _status = 'configuring';
-          _message = 'Datos guardados. La conexión aún debe validarse desde el backend.';
-          _editing = false;
-        });
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      if (data['ok'] != true) {
+        throw StateError(data['error']?.toString() ?? 'Meta no confirmó la conexión.');
       }
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _message = error.message);
+      await _load();
+      if (mounted) {
+        setState(() => _message = data['message'] as String);
+      }
+    } on FunctionException catch (error) {
+      if (mounted) {
+        final details = error.details;
+        setState(() => _message =
+            details is Map ? details['error']?.toString() : error.reasonPhrase);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _message = 'No se completó la conexión: $error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -5129,87 +5170,9 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
     }
   }
 
-  Future<void> _registerNumber() async {
-    final pinController = TextEditingController();
-    final pin = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Registrar número en Cloud API'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Meta requiere registrar el número con un PIN de verificación '
-              'en dos pasos de 6 dígitos antes de poder enviar mensajes. '
-              'Si el número ya tenía 2FA activo, usa ese mismo PIN; si no, '
-              'este PIN quedará configurado como el nuevo.',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: pinController,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              decoration: const InputDecoration(labelText: 'PIN de 6 dígitos'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(pinController.text.trim()),
-            child: const Text('Registrar'),
-          ),
-        ],
-      ),
-    );
-    if (pin == null || !RegExp(r'^\d{6}$').hasMatch(pin)) {
-      if (pin != null && mounted) {
-        setState(() => _message = 'El PIN debe tener exactamente 6 dígitos.');
-      }
-      return;
-    }
-
-    setState(() {
-      _registering = true;
-      _message = null;
-    });
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'register-whatsapp-number',
-        body: {'tenant_id': widget.tenantId, 'pin': pin},
-      );
-      final data = Map<String, dynamic>.from(
-        (response.data as Map?) ?? const {},
-      );
-      if (mounted) {
-        setState(() {
-          _message = data['ok'] == true
-              ? 'Número registrado correctamente en Cloud API. Ya puedes enviar mensajes.'
-              : (data['error'] as String? ?? 'No fue posible registrar el número.');
-        });
-      }
-    } on FunctionException catch (error) {
-      if (mounted) {
-        final details = error.details;
-        final errorMessage = details is Map ? details['error'] : null;
-        setState(
-          () => _message =
-              'No fue posible registrar el número: ${errorMessage ?? error.reasonPhrase}',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _registering = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final readOnly = !_editing;
     final hasIntegration =
         _businessIdController.text.isNotEmpty ||
         _phoneIdController.text.isNotEmpty;
@@ -5226,71 +5189,60 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Datos de la integración',
+                'WhatsApp con coexistencia',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
             Chip(label: Text(_integrationStatusLabel(_status))),
-            const SizedBox(width: 8),
-            if (readOnly)
-              OutlinedButton.icon(
-                onPressed: _saving
-                    ? null
-                    : () => setState(() => _editing = true),
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Editar configuración'),
-              ),
           ],
         ),
         const SizedBox(height: 8),
         const Text(
-          'Registra los identificadores públicos de Meta. Los tokens y secretos se gestionarán exclusivamente en backend.',
+          'Conecta tu cuenta existente de WhatsApp Business para usar el mismo '
+          'número en el celular y en ITONE. Los permisos y las credenciales se '
+          'gestionan por empresa, exclusivamente en backend.',
         ),
         const SizedBox(height: 24),
-        if (readOnly)
-          _WhatsAppIntegrationSummary(
+        _WhatsAppIntegrationSummary(
             configured: hasIntegration,
             businessAccountId: _businessIdController.text,
             phoneNumberId: _phoneIdController.text,
             phoneNumber: _phoneController.text,
             channelName: _nameController.text,
-          )
-        else ...[
-          _IntegrationField(
-            controller: _businessIdController,
-            label: 'WhatsApp Business Account ID',
           ),
-          _IntegrationField(
-            controller: _phoneIdController,
-            label: 'Phone Number ID',
+        const SizedBox(height: 12),
+        if (hasIntegration && _onboardingMode != 'coexistence')
+          const Text(
+            'Esta conexión anterior es Cloud API, no coexistencia. Si el número '
+            'ya no funciona en el celular, regulariza su estado con Meta antes '
+            'de conectarlo de nuevo. Este botón no elimina ni migra la cuenta.',
           ),
-          _IntegrationField(
-            controller: _phoneController,
-            label: 'Número mostrado',
-            required: false,
-          ),
-          _IntegrationField(
-            controller: _nameController,
-            label: 'Nombre del canal',
-            required: false,
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(_saving ? 'Guardando...' : 'Guardar integración'),
-            ),
-          ),
+        const SizedBox(height: 12),
+        const Text(
+          'En Meta selecciona conectar tu WhatsApp Business existente y '
+          'autoriza compartir el historial si deseas importarlo (hasta 180 días). '
+          'No se importan grupos; los adjuntos históricos tienen límites de Meta.',
+        ),
+        if (!WhatsAppSignup.supported) ...[
+          const SizedBox(height: 12),
+          const Text('Realiza la conexión inicial desde ITONE en un navegador web.'),
+        ],
+        if (_setupError != null) ...[
+          const SizedBox(height: 12),
+          Text(_setupError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ],
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
+            FilledButton.icon(
+              onPressed: _saving || !_sdkReady ? null : _connectCoexistence,
+              icon: const Icon(Icons.phone_android),
+              label: Text(_saving ? 'Conectando...' : 'Conectar WhatsApp Business'),
+            ),
             OutlinedButton.icon(
-              onPressed: _validating || !hasIntegration
+              onPressed: _validating || _saving || !hasIntegration
                   ? null
                   : _validateConnection,
               icon: const Icon(Icons.verified_outlined),
@@ -5299,16 +5251,24 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
               ),
             ),
             OutlinedButton.icon(
-              onPressed: _registering || !hasIntegration
-                  ? null
-                  : _registerNumber,
-              icon: const Icon(Icons.app_registration_outlined),
-              label: Text(
-                _registering ? 'Registrando...' : 'Registrar número en Cloud API',
-              ),
+              onPressed: _saving ? null : _load,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Actualizar estado'),
             ),
           ],
         ),
+        if (_onboardingMode == 'coexistence') ...[
+          const SizedBox(height: 14),
+          Text('Historial: ${_historyStatusLabel(_historyStatus)} ($_historyProgress%)'),
+          if (_historyStatus == 'pending' || _historyStatus == 'syncing')
+            LinearProgressIndicator(value: _historyProgress / 100),
+          if (_historyError != null) Text(_historyError!),
+          const Text(
+            'Actualizar estado consulta el progreso; no repite la solicitud '
+            'de importación. Coexistencia no elimina restricciones de Meta ni '
+            'la ventana de 24 horas para mensajes libres enviados por API.',
+          ),
+        ],
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
         if (_blockedEntities.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -5345,17 +5305,20 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
             ),
           ),
         ],
-        if (!readOnly) ...[
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: _saving ? null : () => setState(() => _editing = false),
-            child: const Text('Cancelar'),
-          ),
-        ],
       ],
     );
   }
 }
+
+String _historyStatusLabel(String status) => switch (status) {
+  'not_requested' => 'No solicitado',
+  'pending' => 'Solicitud enviada a Meta',
+  'syncing' => 'Importando',
+  'complete' => 'Importación completada',
+  'declined' => 'Historial no autorizado',
+  'error' => 'Error de sincronización',
+  _ => status,
+};
 
 class _WhatsAppIntegrationSummary extends StatelessWidget {
   const _WhatsAppIntegrationSummary({
@@ -5379,7 +5342,7 @@ class _WhatsAppIntegrationSummary extends StatelessWidget {
         child: ListTile(
           leading: Icon(Icons.link_off_outlined),
           title: Text('Cuenta de Meta no conectada'),
-          subtitle: Text('Pulsa Editar configuración para registrar el canal.'),
+          subtitle: Text('Pulsa Conectar WhatsApp Business para autorizar la coexistencia.'),
         ),
       );
     }
@@ -5450,33 +5413,6 @@ String _integrationStatusLabel(String status) {
       return 'Deshabilitada';
     default:
       return 'No configurada';
-  }
-}
-
-class _IntegrationField extends StatelessWidget {
-  const _IntegrationField({
-    required this.controller,
-    required this.label,
-    this.required = true,
-  });
-
-  final TextEditingController controller;
-  final String label;
-  final bool required;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: TextField(
-        controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          suffixText: required ? '*' : null,
-          border: const OutlineInputBorder(),
-        ),
-      ),
-    );
   }
 }
 
@@ -6698,7 +6634,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     try {
       final rows = await _client
           .from('whatsapp_conversations')
-          .select('id, status, last_message_at, updated_at, whatsapp_contacts(display_name, profile_name, phone_number)')
+          .select('id, status, last_message_at, updated_at, whatsapp_contacts(display_name, profile_name, phone_number, whatsapp_user_id)')
           .eq('tenant_id', widget.tenantId)
           .order('updated_at', ascending: false);
       final conversations = (rows as List)
@@ -6738,7 +6674,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
       final rows = await _client
           .from('whatsapp_messages')
           .select(
-            'id, direction, message_type, body, created_at, provider_timestamp, delivery_status, delivery_error',
+            'id, direction, message_type, body, created_at, provider_timestamp, delivery_status, delivery_error, source',
           )
           .eq('tenant_id', widget.tenantId)
           .eq('conversation_id', conversationId)
@@ -6749,9 +6685,9 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
             .map((row) => Map<String, dynamic>.from(row as Map))
             .toList();
         _messages.sort((a, b) {
-          final aDate = DateTime.tryParse(a['created_at'] as String? ?? '') ??
+          final aDate = DateTime.tryParse((a['provider_timestamp'] ?? a['created_at']) as String? ?? '') ??
               DateTime.fromMillisecondsSinceEpoch(0);
-          final bDate = DateTime.tryParse(b['created_at'] as String? ?? '') ??
+          final bDate = DateTime.tryParse((b['provider_timestamp'] ?? b['created_at']) as String? ?? '') ??
               DateTime.fromMillisecondsSinceEpoch(0);
           return aDate.compareTo(bDate);
         });
@@ -6815,7 +6751,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   }
 
   String _contactName(Map<String, dynamic> contact) =>
-      (contact['display_name'] ?? contact['profile_name'] ?? contact['phone_number'] ?? 'Contacto') as String;
+      (contact['display_name'] ?? contact['profile_name'] ?? contact['phone_number'] ?? contact['whatsapp_user_id'] ?? 'Contacto') as String;
 
   String _formatDate(String? value) {
     if (value == null) return '';
@@ -6949,6 +6885,11 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                                     sent: sent,
                                     theme: theme,
                                   ),
+                                  if (message['source'] == 'business_app' || message['source'] == 'history')
+                                    Text(
+                                      message['source'] == 'history' ? 'Historial importado' : 'Desde el celular',
+                                      style: theme.textTheme.labelSmall,
+                                    ),
                                   if (sent &&
                                       message['delivery_status'] == 'failed' &&
                                       message['delivery_error'] is String)

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { accountToken, graphVersion, WhatsAppError } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,8 +28,7 @@ Deno.serve(async (request) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  if (!supabaseUrl || !serviceRoleKey || !accessToken) {
+  if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "WhatsApp sending secrets are not configured" }, 500);
   }
 
@@ -63,12 +63,13 @@ Deno.serve(async (request) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: membership } = await adminClient
+    const { data: membership, error: membershipError } = await adminClient
       .from("tenant_memberships")
       .select("role")
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
+    if (membershipError) throw membershipError;
     if (!isAllowedRole(membership?.role)) {
       return json({ error: "You are not allowed to send WhatsApp messages" }, 403);
     }
@@ -100,8 +101,9 @@ Deno.serve(async (request) => {
       return json({ error: "WhatsApp account or recipient is not configured" }, 400);
     }
 
+    const accessToken = await accountToken(adminClient, tenantId, phoneNumberId);
     const graphResponse = await fetch(
-      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}/messages`,
+      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(phoneNumberId)}/messages`,
       {
         method: "POST",
         headers: {
@@ -122,6 +124,7 @@ Deno.serve(async (request) => {
       console.error("Meta rejected WhatsApp message", graphData);
       return json({
         error: graphData.error?.message ?? "Meta rejected the message",
+        error_code: graphData.error?.code ?? null,
       }, 400);
     }
 
@@ -132,7 +135,7 @@ Deno.serve(async (request) => {
 
     const { error: insertError } = await adminClient
       .from("whatsapp_messages")
-      .insert({
+      .upsert({
         tenant_id: tenantId,
         conversation_id: conversation.id,
         whatsapp_account_id: conversation.whatsapp_account_id,
@@ -140,11 +143,11 @@ Deno.serve(async (request) => {
         direction: "outbound",
         message_type: "text",
         body: messageBody.trim(),
-        delivery_status: "sent",
-      });
+        delivery_status: "accepted",
+      }, { onConflict: "whatsapp_account_id,provider_message_id", ignoreDuplicates: true });
     if (insertError) throw insertError;
 
-    await adminClient
+    const { error: updateError } = await adminClient
       .from("whatsapp_conversations")
       .update({
         last_message_at: new Date().toISOString(),
@@ -152,10 +155,12 @@ Deno.serve(async (request) => {
       })
       .eq("id", conversation.id)
       .eq("tenant_id", tenantId);
+    if (updateError) throw updateError;
 
     return json({ ok: true, provider_message_id: providerMessageId });
   } catch (error) {
     console.error("WhatsApp send error", error);
+    if (error instanceof WhatsAppError) return json({ error: error.message }, error.status);
     return json({ error: "Unexpected WhatsApp sending error" }, 500);
   }
 });

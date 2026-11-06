@@ -79,6 +79,11 @@ Deno.serve(async (request) => {
       .maybeSingle();
     if (integrationError) throw integrationError;
     const metadata = integration?.metadata ?? {};
+    if (metadata.onboarding_mode === "coexistence") {
+      return json({
+        error: "Los números con coexistencia no deben registrarse por PIN. Usa Embedded Signup.",
+      }, 409);
+    }
     const phoneNumberId = metadata.phone_number_id;
     if (!integration || typeof phoneNumberId !== "string" || !phoneNumberId) {
       return json({ error: "WhatsApp integration is not configured" }, 400);

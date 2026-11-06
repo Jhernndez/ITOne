@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { accountToken, graphVersion, WhatsAppError } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,8 +20,7 @@ Deno.serve(async (request) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  if (!supabaseUrl || !serviceRoleKey || !accessToken) {
+  if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "WhatsApp validation secrets are not configured" }, 500);
   }
 
@@ -75,8 +75,9 @@ Deno.serve(async (request) => {
       return json({ error: "WhatsApp integration is not configured" }, 400);
     }
 
+    const accessToken = await accountToken(adminClient, tenantId, phoneNumberId);
     const graphResponse = await fetch(
-      `https://graph.facebook.com/v23.0/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,health_status,quality_rating,messaging_limit_tier,name_status,code_verification_status,status,account_mode`,
+      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,health_status,quality_rating,messaging_limit_tier,name_status,code_verification_status,status,account_mode,is_on_biz_app,platform_type`,
       { headers: { "Authorization": "Bearer " + accessToken } },
     );
     const graphData = await graphResponse.json();
@@ -124,7 +125,9 @@ Deno.serve(async (request) => {
     // independent of what health_status.entities reports.
     const restrictedPhoneStatuses = ["RESTRICTED", "FLAGGED", "DISABLED"];
     const isPhoneRestricted = restrictedPhoneStatuses.includes(graphData.status);
-    const isRestricted = blockedEntities.length > 0 || isPhoneRestricted;
+    const coexistenceLost = metadata.onboarding_mode === "coexistence" &&
+      (graphData.is_on_biz_app !== true || graphData.platform_type !== "CLOUD_API");
+    const isRestricted = blockedEntities.length > 0 || isPhoneRestricted || coexistenceLost;
 
     const safeMetadata = {
       ...metadata,
@@ -138,17 +141,22 @@ Deno.serve(async (request) => {
       code_verification_status: graphData.code_verification_status ?? null,
       phone_status: graphData.status ?? null,
       account_mode: graphData.account_mode ?? null,
+      is_on_biz_app: graphData.is_on_biz_app ?? null,
+      platform_type: graphData.platform_type ?? null,
     };
-    await adminClient.from("tenant_integrations").update({
+    const { error: updateError } = await adminClient.from("tenant_integrations").update({
       status: isRestricted ? "restricted" : "active",
       configured_at: new Date().toISOString(),
       metadata: safeMetadata,
       updated_at: new Date().toISOString(),
     }).eq("id", integration.id);
+    if (updateError) throw updateError;
 
     return json({
       status: isRestricted ? "restricted" : "active",
-      message: isRestricted
+      message: coexistenceLost
+        ? "Meta ya no confirma coexistencia para este número. Conecta de nuevo WhatsApp Business."
+        : isRestricted
         ? "Meta reporta restricciones activas sobre esta integración."
         : "Conexión con Meta validada correctamente.",
       verified_name: graphData.verified_name ?? null,
@@ -163,6 +171,7 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     console.error("WhatsApp integration validation error", error);
+    if (error instanceof WhatsAppError) return json({ error: error.message }, error.status);
     return json({ error: "Unexpected validation error" }, 500);
   }
 });

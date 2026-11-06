@@ -1,277 +1,101 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function isoTimestamp(value: unknown): string | null {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
-  return new Date(Number(value) * 1000).toISOString();
-}
-
-// Best-effort extraction of a human-readable body for every message type
-// WhatsApp Cloud API can deliver. Media types have no text content, but we
-// surface captions/filenames so the UI has something meaningful to show.
-// When Meta itself marks a message as "unsupported" it never forwards the
-// original content (e.g. view-once media, polls); we surface Meta's own
-// explanation from message.errors instead of pretending we can read it.
-function extractMessageBody(message: Record<string, any>): string | null {
-  switch (message.type) {
-    case "text":
-      return message.text?.body ?? null;
-    case "image":
-      return message.image?.caption ?? "[Imagen recibida]";
-    case "video":
-      return message.video?.caption ?? "[Video recibido]";
-    case "audio":
-      return "[Audio recibido]";
-    case "voice":
-      return "[Nota de voz recibida]";
-    case "sticker":
-      return "[Sticker recibido]";
-    case "document":
-      return message.document?.caption ??
-        (message.document?.filename
-          ? `[Documento: ${message.document.filename}]`
-          : "[Documento recibido]");
-    case "location": {
-      const loc = message.location;
-      if (!loc) return "[Ubicación recibida]";
-      return loc.name
-        ? `[Ubicación: ${loc.name}]`
-        : `[Ubicación: ${loc.latitude}, ${loc.longitude}]`;
-    }
-    case "contacts": {
-      const names = (message.contacts ?? [])
-        .map((entry: any) => entry?.name?.formatted_name)
-        .filter((name: unknown) => typeof name === "string");
-      return names.length ? `[Contacto: ${names.join(", ")}]` : "[Contacto recibido]";
-    }
-    case "button":
-      return message.button?.text ?? "[Respuesta de botón]";
-    case "interactive": {
-      const interactive = message.interactive;
-      const reply =
-        interactive?.button_reply?.title ?? interactive?.list_reply?.title;
-      return reply ? `[Respuesta: ${reply}]` : "[Mensaje interactivo recibido]";
-    }
-    case "reaction":
-      return message.reaction?.emoji
-        ? `[Reacción: ${message.reaction.emoji}]`
-        : "[Reacción recibida]";
-    case "system":
-      return message.system?.body ?? "[Notificación del sistema]";
-    case "unsupported": {
-      const detail = Array.isArray(message.errors) ? message.errors[0] : null;
-      const reason = detail
-        ? [detail.title, detail.message].filter(Boolean).join(": ")
-        : null;
-      return reason
-        ? `[Mensaje no compatible con la API de WhatsApp: ${reason}. Ábrelo desde la app de WhatsApp del número para leerlo.]`
-        : "[Mensaje no compatible con la API de WhatsApp. Ábrelo desde la app de WhatsApp del número para leerlo.]";
-    }
-    default:
-      return null;
-  }
-}
+import { json } from "../_shared/whatsapp.ts";
+import {
+  historyState, normalizeMessages, object, objects, validSignature,
+} from "../_shared/whatsapp_webhook.ts";
 
 Deno.serve(async (request) => {
-  const verifyToken = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    const verifyToken = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
+    const challenge = url.searchParams.get("hub.challenge");
+    if (verifyToken && url.searchParams.get("hub.mode") === "subscribe" &&
+        url.searchParams.get("hub.verify_token") === verifyToken && challenge) {
+      return new Response(challenge);
+    }
+    return new Response("Webhook verification failed", { status: 403 });
+  }
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   try {
-    if (request.method === "GET") {
-      const url = new URL(request.url);
-      const mode = url.searchParams.get("hub.mode");
-      const token = url.searchParams.get("hub.verify_token");
-      const challenge = url.searchParams.get("hub.challenge");
-      if (mode === "subscribe" && token === verifyToken && challenge) {
-        return new Response(challenge, { status: 200 });
-      }
-      return new Response("Webhook verification failed", { status: 403 });
-    }
-
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", {
-        status: 405,
-        headers: corsHeaders,
-      });
-    }
-
     const url = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!url || !serviceKey) {
-      throw new Error("Supabase secrets are not configured");
+    const appSecret = Deno.env.get("META_APP_SECRET");
+    if (!url || !serviceKey || !appSecret) {
+      throw new Error("Supabase and META_APP_SECRET must be configured");
     }
-
-    const payload = await request.json();
+    const raw = await request.text();
+    if (!await validSignature(raw, request.headers.get("X-Hub-Signature-256"), appSecret)) {
+      console.warn("WhatsApp webhook signature rejected");
+      return json({ error: "Invalid webhook signature" }, 401);
+    }
+    const payload = object(JSON.parse(raw));
     const client = createClient(url, serviceKey);
-    // JSON.stringify avoids Deno's default console depth limit, which was
-    // truncating nested objects (e.g. change.value) to "[Object]" and
-    // hiding the actual message payload in the logs.
-    console.log("WhatsApp webhook event received", JSON.stringify(payload));
-
-    for (const entry of payload.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        const value = change.value;
-        const phoneNumberId = value?.metadata?.phone_number_id;
+    for (const entry of objects(payload.entry)) {
+      for (const change of objects(entry.changes)) {
+        const value = object(change.value);
+        const phoneNumberId = object(value.metadata).phone_number_id;
         if (typeof phoneNumberId !== "string") continue;
         const { data: account, error: accountError } = await client
-          .from("whatsapp_accounts")
-          .select("id, tenant_id")
-          .eq("phone_number_id", phoneNumberId)
-          .eq("status", "active")
-          .maybeSingle();
+          .from("whatsapp_accounts").select("id, tenant_id, business_account_id")
+          .eq("phone_number_id", phoneNumberId).eq("status", "active").maybeSingle();
         if (accountError) throw accountError;
         if (!account) {
-          console.warn("Unmapped WhatsApp phone_number_id", phoneNumberId);
-          continue;
+          // Return a retryable response during onboarding rather than lose a
+          // chunk delivered between Meta subscription and account persistence.
+          console.warn("Unmapped WhatsApp phone number", { phoneNumberId });
+          return json({ error: "WhatsApp account is not mapped yet" }, 503);
         }
-
-        for (const status of value.statuses ?? []) {
-          const statusError = Array.isArray(status.errors)
-            ? status.errors[0]
-            : null;
-          const errorCode = statusError?.code != null
-            ? String(statusError.code)
-            : null;
-          const errorMessage = statusError
-            ? [statusError.title, statusError.message, statusError.details]
-                .filter((part) => typeof part === "string" && part.length > 0)
-                .join(": ")
+        if (entry.id !== account.business_account_id) {
+          throw new Error("Webhook account does not match mapped business account");
+        }
+        for (const status of objects(value.statuses)) {
+          const detail = objects(status.errors)[0];
+          const errorCode = detail?.code != null ? String(detail.code) : null;
+          const errorMessage = detail
+            ? [detail.title, detail.message, object(detail.error_data).details]
+              .filter((part) => typeof part === "string" && part.length > 0).join(": ")
             : null;
           console.log("WhatsApp message status received", {
-            phoneNumberId,
-            messageId: status.id,
-            status: status.status,
-            recipientId: status.recipient_id,
-            timestamp: status.timestamp,
-            errorCode,
-            errorMessage,
-            errors: status.errors ?? [],
+            phoneNumberId, messageId: status.id, status: status.status, errorCode, errorMessage,
           });
-          if (typeof status.id === "string" && typeof status.status === "string") {
-            const deliveryStatus = ["sent", "delivered", "read", "failed"].includes(
-              status.status,
-            )
-              ? status.status
-              : "accepted";
-            const { error: statusError } = await client
-              .from("whatsapp_messages")
-              .update({
-                delivery_status: deliveryStatus,
-                delivery_error_code: errorCode,
-                delivery_error: errorMessage,
-              })
-              .eq("provider_message_id", status.id)
-              .eq("whatsapp_account_id", account.id);
-            if (statusError) console.error("WhatsApp status update failed", statusError);
-          }
+          if (typeof status.id !== "string" || typeof status.status !== "string") continue;
+          const { error } = await client.from("whatsapp_messages").update({
+            delivery_status: ["sent", "delivered", "read", "failed"].includes(status.status)
+              ? status.status : "accepted",
+            delivery_error_code: errorCode,
+            delivery_error: errorMessage,
+          }).eq("provider_message_id", status.id).eq("whatsapp_account_id", account.id);
+          if (error) throw error;
         }
-
-        for (const message of value.messages ?? []) {
-          const sender = message.from;
-          const providerMessageId = message.id;
-          if (typeof sender !== "string" ||
-              typeof providerMessageId !== "string") {
-            continue;
-          }
-          if (message.type === "unsupported") {
-            console.log(
-              "WhatsApp unsupported message raw payload",
-              JSON.stringify(message),
-            );
-          }
-
-          const profileName = value.contacts?.find(
-            (contact: { wa_id?: string }) => contact.wa_id === sender,
-          )?.profile?.name ?? null;
-          const messageTime = isoTimestamp(message.timestamp);
-          const contactPayload = {
-            tenant_id: account.tenant_id,
-            phone_number: sender,
-            profile_name: profileName,
-            last_message_at: messageTime,
-            updated_at: new Date().toISOString(),
-          };
-          const { data: contact, error: contactError } = await client
-            .from("whatsapp_contacts")
-            .upsert(contactPayload, { onConflict: "tenant_id,phone_number" })
-            .select("id")
-            .single();
-          if (contactError) throw contactError;
-
-          const { data: conversation, error: conversationError } = await client
-            .from("whatsapp_conversations")
-            .upsert({
-              tenant_id: account.tenant_id,
-              whatsapp_account_id: account.id,
-              contact_id: contact.id,
-              status: "open",
-              last_message_at: messageTime,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: "tenant_id,contact_id,status" })
-            .select("id")
-            .single();
-          if (conversationError) throw conversationError;
-
-          const body = extractMessageBody(message);
-          const { error: messageError } = await client
-            .from("whatsapp_messages")
-            .upsert({
-              tenant_id: account.tenant_id,
-              conversation_id: conversation.id,
-              whatsapp_account_id: account.id,
-              provider_message_id: providerMessageId,
-              direction: "inbound",
-              message_type: message.type ?? "unknown",
-              body,
-              provider_timestamp: messageTime,
-            }, { onConflict: "whatsapp_account_id,provider_message_id" });
-          if (messageError) throw messageError;
-
-          const { data: recipients, error: recipientsError } = await client
-            .from("tenant_memberships")
-            .select("user_id, role")
-            .eq("tenant_id", account.tenant_id)
-            .in("role", ["tenant_admin", "supervisor", "operator"]);
-          if (recipientsError) throw recipientsError;
-          if (recipients?.length) {
-            const notificationRows = recipients.map((recipient) => ({
-              tenant_id: account.tenant_id,
-              recipient_user_id: recipient.user_id,
-              type: "whatsapp_inbound",
-              title: "Nuevo mensaje de WhatsApp",
-              body: `${profileName ?? sender}: ${body ?? "Mensaje recibido"}`,
-              data: {
-                conversation_id: conversation.id,
-                provider_message_id: providerMessageId,
-                phone_number: sender,
-              },
-            }));
-            const { error: notificationError } = await client
-              .from("notifications")
-              .insert(notificationRows);
-            if (notificationError) {
-              console.error(
-                "WhatsApp notification creation failed",
-                notificationError,
-              );
-            }
-          }
+        const messages = normalizeMessages(String(change.field), value);
+        // Bounded RPC batches avoid a network round-trip per historical message.
+        // Commit before acknowledging so Meta retries recover partial ingestion.
+        for (let offset = 0; offset < messages.length; offset += 200) {
+          const { error } = await client.rpc("ingest_whatsapp_messages", {
+            p_account_id: account.id, p_messages: messages.slice(offset, offset + 200),
+          });
+          if (error) throw error;
+        }
+        const stateSync = objects(value.state_sync);
+        if (stateSync.length) {
+          const { error } = await client.rpc("sync_whatsapp_contacts", {
+            p_account_id: account.id, p_contacts: stateSync,
+          });
+          if (error) throw error;
+        }
+        if (change.field === "history") {
+          const state = historyState(value);
+          const { error } = await client.rpc("update_whatsapp_history_progress", {
+            p_account_id: account.id, p_progress: state.progress,
+            p_error: state.error, p_declined: state.declined,
+          });
+          if (error) throw error;
         }
       }
     }
-
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ ok: true });
   } catch (error) {
-    console.error("WhatsApp webhook error", error);
-    return new Response(JSON.stringify({ error: String(error) }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("WhatsApp webhook processing failed", error);
+    return json({ error: "WhatsApp webhook processing failed; retry required" }, 500);
   }
 });
