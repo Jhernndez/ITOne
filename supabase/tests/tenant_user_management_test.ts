@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { PGlite } from "npm:@electric-sql/pglite";
+import { compare, hash } from "npm:bcryptjs@3.0.3";
 
 const ids = {
   tenant: "10000000-0000-0000-0000-000000000001",
@@ -32,10 +33,12 @@ Deno.test("tenant user management enforces scope, roles, active access and last 
       create table auth.users(
         id uuid primary key, email text, banned_until timestamptz, last_sign_in_at timestamptz,
         raw_app_meta_data jsonb default '{}', raw_user_meta_data jsonb default '{}',
-        encrypted_password text
+        encrypted_password text, updated_at timestamptz
       );
       create function auth.uid() returns uuid language sql as
         'select nullif(current_setting(''request.jwt.claim.sub'', true), '''')::uuid';
+      create table auth.sessions(id uuid primary key, user_id uuid);
+      create table auth.refresh_tokens(user_id text);
       create schema storage;
       create table storage.objects(id uuid, bucket_id text, name text);
       alter table storage.objects enable row level security;
@@ -93,6 +96,73 @@ Deno.test("tenant user management enforces scope, roles, active access and last 
     assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, null);
     assert.equal((await sql("select current_tenant_role($1) as role", [ids.other])).rows[0].role, "operator");
     assert.equal((await sql("select * from whatsapp_contacts")).rows.length, 1);
+    await db.exec("reset role");
+    const testAccountEditing = async (newId: string) => {
+    await db.exec("reset role");
+    await db.exec(await Deno.readTextFile(new URL("20261106170000_edit_tenant_user_accounts.sql", migrations)));
+    const account = (actor: string, target: string, name: string, expected: string, passwordHash: string | null = null) =>
+      sql("select update_tenant_user_account($1,$2,$3,$4,$5,$6)",
+        [actor, ids.tenant, target, name, expected, passwordHash]);
+    // Both active and inactive memberships in another company make it shared.
+    await sql("insert into tenant_memberships(tenant_id,user_id,role,is_active) values($1,$2,'operator',false)", [ids.other, newId]);
+    await db.exec("set role service_role");
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nuevo Agente"), /Cuenta compartida/);
+    await db.exec("reset role");
+    await sql("delete from tenant_memberships where user_id=$1 and tenant_id=$2", [newId, ids.other]);
+    await login(ids.admin);
+    const listed = (await list(ids.tenant)).rows.find((row) => row.user_id === newId);
+    assert.equal(listed?.can_manage_account, true);
+    assert.equal((await list(ids.tenant)).rows.find((row) => row.user_id === ids.admin)?.can_manage_account, false);
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nuevo Agente"), /permission denied/);
+    await db.exec("reset role; set role service_role");
+    await assert.rejects(account(ids.secondAdmin, newId, "No permitido", "Nuevo Agente"), /administrador activo/);
+    await assert.rejects(account(ids.admin, ids.admin, "No permitido", ""), /administrador activo/);
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Obsoleto"), /nombre cambio/);
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nuevo Agente", "plaintext"), /credencial/);
+    await account(ids.admin, newId, " Nombre Editado ", "Nuevo Agente");
+    await db.exec("reset role");
+    assert.equal((await sql("select full_name from user_profiles where user_id=$1", [newId])).rows[0].full_name, "Nombre Editado");
+    assert.equal((await sql("select encrypted_password from auth.users where id=$1", [newId])).rows[0].encrypted_password, "changed-hash");
+    const temporaryHash = await hash("Temporary-New123!", 12);
+    await sql("insert into auth.sessions values($1,$1)", [newId]);
+    await sql("insert into auth.refresh_tokens values($1)", [newId]);
+    await db.exec("set role service_role");
+    await account(ids.admin, newId, "Nombre Editado", "Nombre Editado", temporaryHash);
+    await db.exec("reset role");
+    const authRecord = (await sql("select encrypted_password,raw_user_meta_data->>'full_name' as name,raw_app_meta_data->>'must_set_password' as required from auth.users where id=$1", [newId])).rows[0];
+    assert.equal(authRecord.name, "Nombre Editado");
+    assert.equal(authRecord.required, "true");
+    assert.equal(await compare("Temporary-New123!", String(authRecord.encrypted_password)), true);
+    assert.equal((await sql("select * from auth.sessions where user_id=$1", [newId])).rows.length, 0);
+    assert.equal((await sql("select * from auth.refresh_tokens where user_id=$1", [newId])).rows.length, 0);
+    await login(newId);
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, null);
+    await db.exec("reset role");
+    await sql("update auth.users set encrypted_password='owner-changed-again' where id=$1", [newId]);
+    await login(newId);
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, "operator");
+    await db.exec("reset role");
+    await sql("insert into platform_tenant_grants(platform_user_id,tenant_id,tenant_role) values($1,$2,'operator')", [newId, ids.other]);
+    await db.exec("set role service_role");
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nombre Editado"), /Cuenta compartida/);
+    await db.exec("reset role");
+    await sql("delete from platform_tenant_grants where platform_user_id=$1", [newId]);
+    await sql("insert into platform_memberships(user_id,role) values($1,'platform_support')", [newId]);
+    await db.exec("set role service_role");
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nombre Editado"), /Cuenta compartida/);
+    await db.exec("reset role");
+    await sql("delete from platform_memberships where user_id=$1", [newId]);
+    await sql("update auth.users set banned_until=now()+interval '1 day' where id=$1", [newId]);
+    await db.exec("set role service_role");
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nombre Editado"), /Cuenta compartida/);
+    await db.exec("reset role");
+    await sql("update auth.users set banned_until=null where id=$1", [newId]);
+    await sql("update tenant_memberships set role='tenant_admin' where user_id=$1 and tenant_id=$2", [ids.secondAdmin, ids.tenant]);
+    await sql("update tenant_memberships set is_active=false where user_id=$1 and tenant_id=$2", [ids.admin, ids.tenant]);
+    await db.exec("set role service_role");
+    await assert.rejects(account(ids.admin, newId, "No permitido", "Nombre Editado"), /administrador activo/);
+    };
+    await login(ids.agent);
     assert.equal((await sql("select * from tenants")).rows.length, 1);
     await assert.rejects(list(ids.tenant), /administrador activo/);
     await assert.rejects(list(ids.other), /administrador activo/);
@@ -185,6 +255,7 @@ Deno.test("tenant user management enforces scope, roles, active access and last 
     assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, "operator");
     assert.equal((await sql("select current_tenant_role($1) as role", [ids.other])).rows[0].role, null);
     assert.equal((await sql("select * from whatsapp_contacts")).rows.length, 1);
+    await testAccountEditing(newId);
   } finally {
     await db.close();
   }

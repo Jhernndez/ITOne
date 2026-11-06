@@ -30,6 +30,7 @@ class _Repository extends TenantUserRepository {
       role: TenantRole.agent,
       active: true,
       globallyDisabled: false,
+      canManageAccount: true,
     ),
   ];
   String? failure;
@@ -38,6 +39,38 @@ class _Repository extends TenantUserRepository {
   int creations = 0;
   String? createdEmail;
   String? createdPassword;
+  int accountWrites = 0;
+  String? accountPassword;
+
+  @override
+  Future<void> updateAccount(
+    String tenantId,
+    TenantUser user,
+    String fullName,
+    String? temporaryPassword,
+  ) async {
+    if (failure != null) {
+      throw FunctionException(status: 409, details: {'error': failure});
+    }
+    savedTenant = tenantId;
+    accountWrites++;
+    accountPassword = temporaryPassword;
+    users = users
+        .map(
+          (entry) => entry.id == user.id
+              ? TenantUser(
+                  id: entry.id,
+                  email: entry.email,
+                  name: fullName.trim(),
+                  role: entry.role,
+                  active: entry.active,
+                  globallyDisabled: entry.globallyDisabled,
+                  canManageAccount: entry.canManageAccount,
+                )
+              : entry,
+        )
+        .toList();
+  }
 
   @override
   Future<void> create(
@@ -128,6 +161,110 @@ Future<void> _open(
 }
 
 void main() {
+  Future<void> openAccount(WidgetTester tester) async {
+    await tester.ensureVisible(find.byTooltip('Editar Carlos Agente'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Editar Carlos Agente'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Nombre y contraseña'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'edits exclusive account name without changing password or role',
+    (tester) async {
+      final repository = _Repository();
+      await _open(tester, repository);
+      await openAccount(tester);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Nombre completo'),
+        'Carlos Nuevo',
+      );
+      await tester.tap(find.text('Guardar cuenta'));
+      await tester.pumpAndSettle();
+      expect(repository.accountWrites, 1);
+      expect(repository.accountPassword, isNull);
+      expect(repository.savedTenant, 'company-one');
+      expect(repository.users.last.role, TenantRole.agent);
+      expect(repository.writes, 0);
+      expect(find.text('Carlos Nuevo'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('assigns a new temporal password and hides it after saving', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await _open(tester, repository);
+    await openAccount(tester);
+    final password = find.widgetWithText(
+      TextFormField,
+      'Nueva contraseña temporal (opcional)',
+    );
+    await tester.enterText(password, 'Short1');
+    await tester.tap(find.text('Guardar cuenta'));
+    await tester.pumpAndSettle();
+    expect(repository.accountWrites, 0);
+    await tester.enterText(password, 'Temporary-Changed123!');
+    await tester.tap(find.text('Guardar cuenta'));
+    await tester.pumpAndSettle();
+    expect(repository.accountPassword, 'Temporary-Changed123!');
+    expect(repository.accountWrites, 1);
+    expect(find.text('Temporary-Changed123!'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('disables account editing when backend marks a shared account', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    repository.users[1] = const TenantUser(
+      id: 'agent',
+      name: 'Carlos Agente',
+      email: 'agent@example.test',
+      role: TenantRole.agent,
+      active: true,
+      globallyDisabled: false,
+    );
+    await _open(tester, repository);
+    await tester.tap(find.byTooltip('Editar Carlos Agente'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Nombre y contraseña'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      find.textContaining('se gestionan desde plataforma'),
+      findsOneWidget,
+    );
+    expect(find.text('Guardar cambios'), findsOneWidget);
+  });
+
+  testWidgets('account failure is explicit and dialog fits mobile', (
+    tester,
+  ) async {
+    final repository = _Repository()
+      ..failure = 'Cuenta compartida. Gestiona desde plataforma.';
+    await _open(tester, repository, mobile: true);
+    await openAccount(tester);
+    await tester.tap(find.text('Guardar cuenta'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Cuenta compartida. Gestiona desde plataforma.'),
+      findsOneWidget,
+    );
+    expect(repository.accountWrites, 0);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('creates a new user in the current company with selected role', (
     tester,
   ) async {

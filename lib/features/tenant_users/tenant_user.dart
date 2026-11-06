@@ -24,6 +24,7 @@ class TenantUser {
     this.avatarUrl,
     this.lastSignIn,
     this.createdAt,
+    this.canManageAccount = false,
   });
 
   factory TenantUser.fromJson(Map<String, dynamic> json) => TenantUser(
@@ -36,6 +37,7 @@ class TenantUser {
     globallyDisabled: json['is_globally_disabled'] as bool,
     lastSignIn: DateTime.tryParse(json['last_sign_in_at'] as String? ?? ''),
     createdAt: DateTime.tryParse(json['created_at'] as String? ?? ''),
+    canManageAccount: json['can_manage_account'] as bool? ?? false,
   );
 
   final String id;
@@ -47,6 +49,7 @@ class TenantUser {
   final bool globallyDisabled;
   final DateTime? lastSignIn;
   final DateTime? createdAt;
+  final bool canManageAccount;
 
   bool get effectiveActive => active && !globallyDisabled;
   String get displayName => name.trim().isNotEmpty
@@ -61,6 +64,24 @@ class TenantUserRepository {
   final SupabaseClient client;
 
   String? get currentUserId => client.auth.currentUser?.id;
+
+  Future<void> updateAccount(
+    String tenantId,
+    TenantUser user,
+    String fullName,
+    String? temporaryPassword,
+  ) async {
+    await client.functions.invoke(
+      'manage-tenant-user',
+      body: {
+        'tenant_id': tenantId,
+        'user_id': user.id,
+        'full_name': fullName.trim(),
+        'expected_name': user.name,
+        'password': temporaryPassword,
+      },
+    );
+  }
 
   Future<void> create(
     String tenantId,

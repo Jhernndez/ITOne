@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -308,6 +309,7 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
   Future<void> _edit(TenantUser user) async {
     var role = user.role;
     var active = user.active;
+    var editAccount = false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -324,9 +326,26 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 Text(user.email),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: user.canManageAccount
+                      ? () {
+                          editAccount = true;
+                          Navigator.pop(context, false);
+                        }
+                      : null,
+                  icon: const Icon(Icons.manage_accounts_outlined),
+                  label: const Text('Nombre y contraseña'),
+                ),
+                if (!user.canManageAccount)
+                  const Text(
+                    'Cuenta compartida, de plataforma o bloqueada. '
+                    'El nombre y la contraseña se gestionan desde plataforma.',
+                  ),
                 const SizedBox(height: 20),
                 DropdownButtonFormField<TenantRole>(
                   initialValue: role,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Rol',
                     border: OutlineInputBorder(),
@@ -377,9 +396,183 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
         ),
       ),
     );
+    if (editAccount && mounted) {
+      await _editAccount(user);
+      return;
+    }
     if (confirmed == true && (role != user.role || active != user.active)) {
       await _save(user, role, active);
     }
+  }
+
+  Future<void> _editAccount(TenantUser user) async {
+    final name = TextEditingController(text: user.name);
+    final password = TextEditingController();
+    final form = GlobalKey<FormState>();
+    var saving = false;
+    var obscure = true;
+    String? error;
+    bool saved;
+    try {
+      final route = DialogRoute<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, update) => PopScope(
+            canPop: !saving,
+            child: AlertDialog(
+              title: const Text('Editar nombre y contraseña'),
+              content: SizedBox(
+                width: 440,
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: form,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(user.email),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: name,
+                          enabled: !saving,
+                          maxLength: 120,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre completo',
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Ingresa el nombre.'
+                              : null,
+                        ),
+                        TextFormField(
+                          controller: password,
+                          enabled: !saving,
+                          obscureText: obscure,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          decoration: InputDecoration(
+                            labelText: 'Nueva contraseña temporal (opcional)',
+                            helperText:
+                                'Vacío: conserva la actual. Mínimo 12 caracteres, '
+                                'mayúscula, minúscula y número. Máximo 72 bytes.',
+                            helperMaxLines: 3,
+                            suffixIcon: IconButton(
+                              tooltip: obscure
+                                  ? 'Mostrar contraseña'
+                                  : 'Ocultar contraseña',
+                              onPressed: saving
+                                  ? null
+                                  : () => update(() => obscure = !obscure),
+                              icon: Icon(
+                                obscure
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                            ),
+                          ),
+                          validator: (value) {
+                            final text = value ?? '';
+                            if (text.isEmpty) return null;
+                            return text.length < 12 ||
+                                    utf8.encode(text).length > 72 ||
+                                    !RegExp('[a-z]').hasMatch(text) ||
+                                    !RegExp('[A-Z]').hasMatch(text) ||
+                                    !RegExp('[0-9]').hasMatch(text)
+                                ? 'Usa 12 caracteres, mayúscula, minúscula y número; máximo 72 bytes.'
+                                : null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Solo disponible para cuentas exclusivas de esta empresa. '
+                          'Si asignas una contraseña temporal, comparte la nueva clave '
+                          'por un medio seguro. El usuario deberá cambiarla al entrar; '
+                          'su acceso a los datos queda bloqueado hasta entonces.',
+                        ),
+                        if (error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: saving
+                      ? null
+                      : () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          if (!form.currentState!.validate()) return;
+                          update(() {
+                            saving = true;
+                            error = null;
+                          });
+                          try {
+                            await _repository.updateAccount(
+                              widget.tenantId,
+                              user,
+                              name.text,
+                              password.text.isEmpty ? null : password.text,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext, true);
+                            }
+                          } on FunctionException catch (failure) {
+                            if (dialogContext.mounted) {
+                              final details = failure.details;
+                              update(
+                                () => error =
+                                    details is Map && details['error'] is String
+                                    ? details['error'] as String
+                                    : 'No fue posible editar la cuenta. ${failure.reasonPhrase ?? ''}',
+                              );
+                            }
+                          } catch (failure) {
+                            if (dialogContext.mounted) {
+                              update(
+                                () => error =
+                                    'No fue posible editar la cuenta: $failure',
+                              );
+                            }
+                          } finally {
+                            if (dialogContext.mounted) {
+                              update(() => saving = false);
+                            }
+                          }
+                        },
+                  child: Text(saving ? 'Guardando...' : 'Guardar cuenta'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      saved = await Navigator.of(context).push(route) ?? false;
+      await route.completed;
+    } finally {
+      name.dispose();
+      password.dispose();
+    }
+    if (!saved || !mounted) return;
+    setState(
+      () => _message =
+          'Cuenta actualizada. Si asignaste una contraseña temporal, '
+          'compártela de forma segura; el usuario deberá cambiarla al entrar.',
+    );
+    await _load();
   }
 
   Future<void> _toggle(TenantUser user) async {

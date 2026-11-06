@@ -1517,6 +1517,7 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
           data: {...?user.userMetadata, 'must_set_password': false},
         ),
       );
+      await Supabase.instance.client.auth.refreshSession();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const TenantRouter()),

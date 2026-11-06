@@ -15,6 +15,11 @@ empresa. Consulta las membresías reales de Supabase: no crea usuarios de muestr
   No elimina datos ni modifica el acceso a otras empresas.
 - Pestañas de roles y permisos de consulta. Los módulos operativos que todavía
   son demostraciones se identifican como tales.
+- Desde **Editar acceso > Nombre y contraseña**, editar el nombre y,
+  opcionalmente, asignar otra contraseña temporal. Dejarla vacía conserva la
+  actual. Solo se admite para cuentas exclusivas de la empresa, sin membresías
+  en otras empresas (incluidas las inactivas), permisos de plataforma ni bloqueo
+  global. Las cuentas compartidas se gestionan desde plataforma.
 - No incluye invitaciones, eliminación de usuarios, roles personalizados ni
   historial de actividad.
 
@@ -54,6 +59,22 @@ La migración incorpora `tenant_memberships.is_active` y las RPC
 - El requisito de cambio de contraseña está en `app_metadata`, no controlado por
   el usuario. `current_tenant_role` no concede acceso hasta un cambio real de
   contraseña; un trigger de Auth libera el requisito al cambiar el hash.
+- `manage-tenant-user` valida sesión y rol, calcula un hash bcrypt de coste 12
+  y llama a una RPC exclusiva del servicio. La RPC comprueba de nuevo el
+  administrador, el aislamiento de la cuenta y el nombre esperado antes de
+  guardar. Usa bloqueos de tablas de permisos durante esta transacción corta
+  para impedir que otra empresa reciba acceso a mitad del cambio.
+  La edición de credenciales escribe el hash compatible con Supabase Auth
+  directamente en la misma transacción que el perfil: evita la ventana entre
+  validar aislamiento y una llamada separada a Auth Admin. No transmite la
+  contraseña en claro a SQL ni almacena contraseñas recuperables.
+- Al restablecer la contraseña se eliminan sesiones y tokens de refresco del
+  usuario y se exige un nuevo cambio de contraseña antes de acceder a datos.
+  Un JWT ya emitido no se puede retirar del navegador, pero el rol consultado en
+  base de datos queda bloqueado inmediatamente mientras esté pendiente el cambio.
+  La nueva contraseña temporal requiere al menos 12 caracteres, mayúscula,
+  minúscula y número, y como máximo 72 bytes UTF-8 (límite de bcrypt). Nunca se
+  muestra la contraseña anterior.
 
 Las nuevas tablas con `tenant_id` deben tener RLS y comprobar también
 `current_tenant_role(tenant_id)`: la migración aplica sus políticas a las tablas
@@ -65,8 +86,10 @@ existentes en el momento de ejecutarse, no a tablas creadas posteriormente.
    [20261106150000_tenant_user_management.sql](../supabase/migrations/20261106150000_tenant_user_management.sql)
    y después
    [20261106160000_create_tenant_users.sql](../supabase/migrations/20261106160000_create_tenant_users.sql)
-   mediante las migraciones habituales o el SQL Editor del proyecto. Si ya
-   aplicaste la primera, ejecuta únicamente la nueva.
+   y
+   [20261106170000_edit_tenant_user_accounts.sql](../supabase/migrations/20261106170000_edit_tenant_user_accounts.sql)
+   mediante las migraciones habituales o el SQL Editor del proyecto. Ejecuta
+   únicamente las migraciones que aún no hayas aplicado, en ese orden.
 2. Desplegar las funciones actualizadas:
 
    ```powershell
@@ -76,6 +99,7 @@ existentes en el momento de ejecutarse, no a tablas creadas posteriormente.
    npx supabase functions deploy manage-internal-api
    npx supabase functions deploy connect-whatsapp-coexistence
    npx supabase functions deploy create-tenant-user
+   npx supabase functions deploy manage-tenant-user
    ```
 
 3. Publicar el frontend con el flujo habitual de GitHub / Cloudflare.
@@ -90,4 +114,5 @@ flutter analyze --no-pub
 flutter test --no-pub test\tenant_users_panel_test.dart test\widget_test.dart
 npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\tests\tenant_user_management_test.ts supabase\tests\whatsapp_coexistence_test.ts
 npx --yes --package=deno deno test --no-lock supabase\functions\_shared\tenant_user_creation_test.ts
+npx --yes --package=deno deno test --no-lock supabase\functions\_shared\tenant_user_account_test.ts
 ```
