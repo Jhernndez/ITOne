@@ -97,6 +97,214 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
         .toList();
   }
 
+  Future<void> _create() async {
+    final formKey = GlobalKey<FormState>();
+    final name = TextEditingController();
+    final email = TextEditingController();
+    final password = TextEditingController();
+    var role = TenantRole.agent;
+    var obscure = true;
+    var submitting = false;
+    String? error;
+    var created = false;
+    try {
+      final route = DialogRoute<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, update) => PopScope(
+            canPop: !submitting,
+            child: AlertDialog(
+              title: const Text('Crear usuario'),
+              content: SizedBox(
+                width: 440,
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Acceso únicamente a ${widget.tenantName}.'),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: name,
+                          enabled: !submitting,
+                          maxLength: 120,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre completo',
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Ingresa el nombre.'
+                              : null,
+                        ),
+                        TextFormField(
+                          controller: email,
+                          enabled: !submitting,
+                          maxLength: 254,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Correo electrónico',
+                          ),
+                          validator: (value) =>
+                              !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                                  .hasMatch(value?.trim() ?? '')
+                              ? 'Ingresa un correo válido.'
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<TenantRole>(
+                          initialValue: role,
+                          decoration: const InputDecoration(labelText: 'Rol'),
+                          items: TenantRole.values
+                              .map(
+                                (entry) => DropdownMenuItem(
+                                  value: entry,
+                                  child: Text(entry.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: submitting
+                              ? null
+                              : (value) {
+                                  if (value != null) update(() => role = value);
+                                },
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: password,
+                          enabled: !submitting,
+                          obscureText: obscure,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          maxLength: 128,
+                          decoration: InputDecoration(
+                            labelText: 'Contraseña temporal',
+                            helperText: '12 a 128 caracteres, mayúscula, minúscula y número.',
+                            helperMaxLines: 2,
+                            suffixIcon: IconButton(
+                              tooltip: obscure
+                                  ? 'Mostrar contraseña'
+                                  : 'Ocultar contraseña',
+                              onPressed: submitting
+                                  ? null
+                                  : () => update(() => obscure = !obscure),
+                              icon: Icon(
+                                obscure
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                            ),
+                          ),
+                          validator: (value) {
+                            final text = value ?? '';
+                            return text.length < 12 ||
+                                    text.length > 128 ||
+                                    !RegExp('[a-z]').hasMatch(text) ||
+                                    !RegExp('[A-Z]').hasMatch(text) ||
+                                    !RegExp('[0-9]').hasMatch(text)
+                                ? 'Usa al menos 12 caracteres, mayúscula, minúscula y número.'
+                                : null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Comparte la contraseña por un medio seguro. No se envía correo. '
+                          'Al entrar deberá cambiarla. Si el correo ya existe en ITONE, '
+                          'no se creará ni se vinculará la cuenta.',
+                        ),
+                        if (error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: submitting
+                      ? null
+                      : () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: submitting
+                      ? null
+                      : () async {
+                          if (!formKey.currentState!.validate()) return;
+                          update(() {
+                            submitting = true;
+                            error = null;
+                          });
+                          try {
+                            await _repository.create(
+                              widget.tenantId,
+                              name.text,
+                              email.text,
+                              role,
+                              password.text,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext, true);
+                            }
+                          } on FunctionException catch (failure) {
+                            if (dialogContext.mounted) {
+                              final details = failure.details;
+                              update(
+                                () => error =
+                                    details is Map && details['error'] is String
+                                    ? details['error'] as String
+                                    : 'No fue posible crear el usuario. ${failure.reasonPhrase ?? ''}',
+                              );
+                            }
+                          } catch (failure) {
+                            if (dialogContext.mounted) {
+                              update(
+                                () => error =
+                                    'No fue posible crear el usuario: $failure',
+                              );
+                            }
+                          } finally {
+                            if (dialogContext.mounted) {
+                              update(() => submitting = false);
+                            }
+                          }
+                        },
+                  child: Text(submitting ? 'Creando...' : 'Crear usuario'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      created = await Navigator.of(context).push(route) ?? false;
+      await route.completed;
+    } finally {
+      name.dispose();
+      email.dispose();
+      password.dispose();
+    }
+    if (!created || !mounted) return;
+    setState(() {
+      _search.clear();
+      _roleFilter = null;
+      _statusFilter = 'all';
+      _message =
+          'Usuario creado. Comparte la contraseña temporal de forma segura.';
+    });
+    await _load();
+  }
+
   Future<void> _edit(TenantUser user) async {
     var role = user.role;
     var active = user.active;
@@ -305,6 +513,15 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
         ),
       ),
       const SizedBox(height: 18),
+      Align(
+        alignment: Alignment.centerRight,
+        child: FilledButton.icon(
+          onPressed: _loading || _saving ? null : _create,
+          icon: const Icon(Icons.person_add_alt_1),
+          label: const Text('Crear usuario'),
+        ),
+      ),
+      const SizedBox(height: 12),
       if (_error != null) ...[
         _notice(_error!, error: true),
         const SizedBox(height: 12),

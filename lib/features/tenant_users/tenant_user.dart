@@ -62,6 +62,25 @@ class TenantUserRepository {
 
   String? get currentUserId => client.auth.currentUser?.id;
 
+  Future<void> create(
+    String tenantId,
+    String fullName,
+    String email,
+    TenantRole role,
+    String temporaryPassword,
+  ) async {
+    await client.functions.invoke(
+      'create-tenant-user',
+      body: {
+        'tenant_id': tenantId,
+        'full_name': fullName.trim(),
+        'email': email.trim().toLowerCase(),
+        'role': role.value,
+        'password': temporaryPassword,
+      },
+    );
+  }
+
   Future<List<TenantUser>> list(String tenantId) async {
     final rows = await client.rpc(
       'list_tenant_users',

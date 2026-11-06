@@ -343,7 +343,8 @@ class TenantRouter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user?.userMetadata?['must_set_password'] == true) {
+    if (user?.appMetadata['must_set_password'] == true ||
+        user?.userMetadata?['must_set_password'] == true) {
       return const PasswordSetupPage();
     }
     return FutureBuilder<WorkspaceOptions>(

@@ -6,6 +6,9 @@ empresa. Consulta las membresías reales de Supabase: no crea usuarios de muestr
 ## Alcance
 
 - Búsqueda, filtros de rol/estado, paginación y detalle del usuario.
+- Crear una cuenta nueva con nombre, correo, rol y contraseña temporal.
+  Solo los administradores con membresía activa en la empresa pueden crearla.
+  El correo existente se rechaza sin vincular ni modificar su cuenta.
 - Cambiar entre los roles fijos **Administrador**, **Supervisor** y **Agente**
   (`tenant_admin`, `supervisor`, `operator` en la base de datos).
 - Activar o desactivar una membresía exclusivamente en la empresa seleccionada.
@@ -39,6 +42,18 @@ La migración incorpora `tenant_memberships.is_active` y las RPC
   de base de datos y de las funciones no dependen de esperar ese intervalo.
 - Los logos públicos conservan su lectura pública; sus modificaciones requieren
   acceso administrativo activo.
+- Las cuentas nuevas deben cambiar su contraseña al entrar. La contraseña
+  temporal requiere entre 12 y 128 caracteres, mayúscula, minúscula y número.
+  Se comparte por un canal seguro: no se envía un correo ni se muestra nuevamente
+  después de crear la cuenta. El administrador debe comprobar el destinatario,
+  ya que estas cuentas se crean con el correo confirmado, sin verificación por email.
+- `create-tenant-user` usa Auth Admin solo en el servidor y finaliza el perfil y
+  la membresía en una transacción mediante una RPC exclusiva del servicio. Si
+  falla, intenta retirar únicamente la cuenta recién creada y notifica cualquier
+  fallo de esa compensación.
+- El requisito de cambio de contraseña está en `app_metadata`, no controlado por
+  el usuario. `current_tenant_role` no concede acceso hasta un cambio real de
+  contraseña; un trigger de Auth libera el requisito al cambiar el hash.
 
 Las nuevas tablas con `tenant_id` deben tener RLS y comprobar también
 `current_tenant_role(tenant_id)`: la migración aplica sus políticas a las tablas
@@ -48,7 +63,10 @@ existentes en el momento de ejecutarse, no a tablas creadas posteriormente.
 
 1. Aplicar primero
    [20261106150000_tenant_user_management.sql](../supabase/migrations/20261106150000_tenant_user_management.sql)
-   mediante las migraciones habituales o el SQL Editor del proyecto.
+   y después
+   [20261106160000_create_tenant_users.sql](../supabase/migrations/20261106160000_create_tenant_users.sql)
+   mediante las migraciones habituales o el SQL Editor del proyecto. Si ya
+   aplicaste la primera, ejecuta únicamente la nueva.
 2. Desplegar las funciones actualizadas:
 
    ```powershell
@@ -57,6 +75,7 @@ existentes en el momento de ejecutarse, no a tablas creadas posteriormente.
    npx supabase functions deploy register-whatsapp-number
    npx supabase functions deploy manage-internal-api
    npx supabase functions deploy connect-whatsapp-coexistence
+   npx supabase functions deploy create-tenant-user
    ```
 
 3. Publicar el frontend con el flujo habitual de GitHub / Cloudflare.
@@ -70,4 +89,5 @@ Esta versión del frontend requiere la migración antes de publicarse.
 flutter analyze --no-pub
 flutter test --no-pub test\tenant_users_panel_test.dart test\widget_test.dart
 npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\tests\tenant_user_management_test.ts supabase\tests\whatsapp_coexistence_test.ts
+npx --yes --package=deno deno test --no-lock supabase\functions\_shared\tenant_user_creation_test.ts
 ```

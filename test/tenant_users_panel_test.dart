@@ -35,6 +35,36 @@ class _Repository extends TenantUserRepository {
   String? failure;
   String? savedTenant;
   int writes = 0;
+  int creations = 0;
+  String? createdEmail;
+  String? createdPassword;
+
+  @override
+  Future<void> create(
+    String tenantId,
+    String fullName,
+    String email,
+    TenantRole role,
+    String temporaryPassword,
+  ) async {
+    if (failure != null) {
+      throw FunctionException(status: 409, details: {'error': failure});
+    }
+    creations++;
+    savedTenant = tenantId;
+    createdEmail = email.trim().toLowerCase();
+    createdPassword = temporaryPassword;
+    users.add(
+      TenantUser(
+        id: 'new-user',
+        email: createdEmail!,
+        name: fullName.trim(),
+        role: role,
+        active: true,
+        globallyDisabled: false,
+      ),
+    );
+  }
 
   @override
   String get currentUserId => 'admin';
@@ -98,6 +128,101 @@ Future<void> _open(
 }
 
 void main() {
+  testWidgets('creates a new user in the current company with selected role', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await _open(tester, repository);
+    await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Nombre completo'),
+      'Nueva Persona',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Correo electrónico'),
+      ' NEW@EXAMPLE.TEST ',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Contraseña temporal'),
+      'Temporary-Test123!',
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<TenantRole>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supervisor').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario').last);
+    await tester.pumpAndSettle();
+    expect(repository.creations, 1);
+    expect(repository.savedTenant, 'company-one');
+    expect(repository.createdEmail, 'new@example.test');
+    expect(repository.createdPassword, 'Temporary-Test123!');
+    expect(repository.users.last.role, TenantRole.supervisor);
+    expect(find.text('Nueva Persona'), findsOneWidget);
+    expect(
+      find.text(
+        'Usuario creado. Comparte la contraseña temporal de forma segura.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Temporary-Test123!'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'validates creation and keeps duplicate email errors in the dialog',
+    (tester) async {
+      final repository = _Repository()
+        ..failure = 'Ese correo ya tiene una cuenta en ITONE.';
+      await _open(tester, repository);
+      await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario').last);
+      await tester.pumpAndSettle();
+      expect(repository.creations, 0);
+      expect(find.text('Ingresa el nombre.'), findsOneWidget);
+      expect(find.text('Ingresa un correo válido.'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Nombre completo'),
+        'Persona Existente',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Correo electrónico'),
+        'existing@example.test',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Contraseña temporal'),
+        'Temporary-Test123!',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Ese correo ya tiene una cuenta en ITONE.'),
+        findsOneWidget,
+      );
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(repository.creations, 0);
+      expect(repository.users.length, 2);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('creation dialog fits a mobile screen and defaults to Agente', (
+    tester,
+  ) async {
+    await _open(tester, _Repository(), mobile: true);
+    await tester.tap(find.widgetWithText(FilledButton, 'Crear usuario'));
+    await tester.pumpAndSettle();
+    expect(find.text('Agente').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   test(
     'parses persisted roles and distinguishes tenant access from global bans',
     () {
@@ -139,7 +264,9 @@ void main() {
     );
     await tester.tap(roleField);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(MenuItemButton, 'Agente').hitTestable());
+    await tester.tap(
+      find.widgetWithText(MenuItemButton, 'Agente').hitTestable(),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Ana Admin (tú)'), findsNothing);
     expect(find.text('Carlos Agente'), findsOneWidget);
@@ -149,7 +276,9 @@ void main() {
     );
     await tester.tap(statusField);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(MenuItemButton, 'Activos').hitTestable());
+    await tester.tap(
+      find.widgetWithText(MenuItemButton, 'Activos').hitTestable(),
+    );
     await tester.pumpAndSettle();
     expect(
       find.text('No hay usuarios que coincidan con los filtros.'),
@@ -157,7 +286,9 @@ void main() {
     );
     await tester.tap(statusField);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(MenuItemButton, 'Inactivos').hitTestable());
+    await tester.tap(
+      find.widgetWithText(MenuItemButton, 'Inactivos').hitTestable(),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Carlos Agente'), findsOneWidget);
   });

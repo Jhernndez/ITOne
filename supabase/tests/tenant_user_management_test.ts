@@ -30,7 +30,9 @@ Deno.test("tenant user management enforces scope, roles, active access and last 
       create schema auth;
       grant usage on schema auth to authenticated;
       create table auth.users(
-        id uuid primary key, email text, banned_until timestamptz, last_sign_in_at timestamptz
+        id uuid primary key, email text, banned_until timestamptz, last_sign_in_at timestamptz,
+        raw_app_meta_data jsonb default '{}', raw_user_meta_data jsonb default '{}',
+        encrypted_password text
       );
       create function auth.uid() returns uuid language sql as
         'select nullif(current_setting(''request.jwt.claim.sub'', true), '''')::uuid';
@@ -146,6 +148,43 @@ Deno.test("tenant user management enforces scope, roles, active access and last 
     assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, "tenant_admin");
     await db.exec("reset role; set role anon");
     await assert.rejects(list(ids.tenant), /permission denied/);
+
+    await db.exec("reset role");
+    await db.exec(await Deno.readTextFile(new URL("20261106160000_create_tenant_users.sql", migrations)));
+    const newId = "10000000-0000-0000-0000-000000000007";
+    await sql(`insert into auth.users(id,email,encrypted_password,raw_app_meta_data,raw_user_meta_data)
+      values($1,'new@example.test','temporary-hash',$2,'{"must_set_password":true}')`,
+      [newId, JSON.stringify({
+        must_set_password: true, tenant_creation_actor: ids.admin, tenant_creation_id: ids.tenant,
+      })]);
+    const finish = (actor = ids.admin, tenant = ids.tenant, role = "operator", target = newId) =>
+      sql("select finish_tenant_user_creation($1,$2,$3,' Nuevo Agente ',$4)", [actor, tenant, target, role]);
+    await login(ids.admin);
+    await assert.rejects(finish(), /permission denied/);
+    await db.exec("reset role; grant usage on schema public to service_role; set role service_role");
+    await assert.rejects(finish(ids.secondAdmin), /administrador activo/);
+    await assert.rejects(finish(ids.admin, ids.other), /administrador activo/);
+    await assert.rejects(finish(ids.admin, ids.tenant, "platform_owner"), /no valido/);
+    await assert.rejects(finish(ids.admin, ids.tenant, "operator", ids.outsider), /cuentas nuevas/);
+    await finish();
+    await assert.rejects(finish(), /cuentas nuevas/);
+    await db.exec("reset role");
+    assert.equal((await sql("select * from tenant_memberships where user_id=$1", [newId])).rows.length, 1);
+    assert.equal((await sql("select full_name from user_profiles where user_id=$1", [newId])).rows[0].full_name, "Nuevo Agente");
+    await login(newId);
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, null);
+    assert.equal((await sql("select * from whatsapp_contacts")).rows.length, 0);
+    await db.exec("reset role");
+    // User-editable metadata alone must not bypass the password requirement.
+    await sql(`update auth.users set raw_user_meta_data='{"must_set_password":false}' where id=$1`, [newId]);
+    await login(newId);
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, null);
+    await db.exec("reset role");
+    await sql("update auth.users set encrypted_password='changed-hash' where id=$1", [newId]);
+    await login(newId);
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.tenant])).rows[0].role, "operator");
+    assert.equal((await sql("select current_tenant_role($1) as role", [ids.other])).rows[0].role, null);
+    assert.equal((await sql("select * from whatsapp_contacts")).rows.length, 1);
   } finally {
     await db.close();
   }
