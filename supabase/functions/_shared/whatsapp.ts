@@ -60,11 +60,11 @@ export async function requireTenantAdmin(request: Request, tenantId: string) {
   const { data: disabled, error: disabledError } = await client.rpc("is_current_user_disabled");
   if (disabledError) throw disabledError;
   if (disabled) throw new WhatsAppError("User access is disabled", 403);
-  const { data: membership, error: membershipError } = await admin
-    .from("tenant_memberships").select("role")
-    .eq("tenant_id", tenantId).eq("user_id", user.id).maybeSingle();
+  const { data: role, error: membershipError } = await client.rpc(
+    "current_tenant_role", { p_tenant_id: tenantId },
+  );
   if (membershipError) throw membershipError;
-  if (membership?.role !== "tenant_admin") {
+  if (role !== "tenant_admin") {
     throw new WhatsAppError("Solo el administrador de esta empresa puede conectar WhatsApp", 403);
   }
   return admin;

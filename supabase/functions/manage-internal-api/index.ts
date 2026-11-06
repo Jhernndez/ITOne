@@ -117,22 +117,11 @@ Deno.serve(async (request) => {
     if (typeof tenantId !== "string") return json({ error: "tenant_id is required" }, 400);
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: membership } = await adminClient
-      .from("tenant_memberships")
-      .select("role")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    const { data: platformMembership } = await adminClient
-      .from("platform_memberships")
-      .select("role")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    const isTenantAdmin =
-      membership?.role === "tenant_admin" ||
-      platformMembership?.role === "platform_owner" ||
-      platformMembership?.role === "platform_admin";
-    if (!isTenantAdmin) {
+    const { data: role, error: roleError } = await userClient.rpc(
+      "current_tenant_role", { p_tenant_id: tenantId },
+    );
+    if (roleError) throw roleError;
+    if (role !== "tenant_admin") {
       return json({ error: "Solo un administrador del tenant puede gestionar APIs internas" }, 403);
     }
 

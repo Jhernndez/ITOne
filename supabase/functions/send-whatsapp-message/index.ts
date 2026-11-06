@@ -63,14 +63,11 @@ Deno.serve(async (request) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: membership, error: membershipError } = await adminClient
-      .from("tenant_memberships")
-      .select("role")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const { data: role, error: membershipError } = await userClient.rpc(
+      "current_tenant_role", { p_tenant_id: tenantId },
+    );
     if (membershipError) throw membershipError;
-    if (!isAllowedRole(membership?.role)) {
+    if (!isAllowedRole(role)) {
       return json({ error: "You are not allowed to send WhatsApp messages" }, 403);
     }
 

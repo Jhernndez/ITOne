@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
+import 'features/tenant_users/tenant_users_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -319,14 +321,19 @@ class TenantRouter extends StatelessWidget {
 
     final memberships = await client
         .from('tenant_memberships')
-        .select('tenant_id, role, tenants(name, slug)')
+        .select('tenant_id, role, is_active, tenants(name, slug)')
         .eq('user_id', user.id);
     final platformMemberships = await client
         .from('platform_memberships')
         .select('role')
         .eq('user_id', user.id);
     return WorkspaceOptions(
-      tenantMemberships: List<Map<String, dynamic>>.from(memberships),
+      tenantMemberships: List<Map<String, dynamic>>.from(
+        memberships.where((membership) => membership['is_active'] == true),
+      ),
+      hasInactiveMemberships: memberships.any(
+        (membership) => membership['is_active'] == false,
+      ),
       platformMembership: platformMemberships.isEmpty
           ? null
           : Map<String, dynamic>.from(platformMemberships.first),
@@ -355,7 +362,38 @@ class TenantRouter extends StatelessWidget {
           );
         }
         final workspaces = snapshot.data!;
-        if (workspaces.isEmpty) return const TenantOnboardingPage();
+        if (workspaces.isEmpty) {
+          if (workspaces.hasInactiveMemberships) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Sin acceso activo')),
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Tu acceso a las empresas está desactivado. '
+                        'Contacta a su administrador.',
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () => (context as Element).markNeedsBuild(),
+                        child: const Text('Reintentar'),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            Supabase.instance.client.auth.signOut(),
+                        child: const Text('Cerrar sesión'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+          return const TenantOnboardingPage();
+        }
         if (workspaces.hasMultiple) {
           return WorkspaceSelector(workspaces: workspaces);
         }
@@ -376,10 +414,12 @@ class WorkspaceOptions {
   const WorkspaceOptions({
     required this.tenantMemberships,
     required this.platformMembership,
+    this.hasInactiveMemberships = false,
   });
 
   final List<Map<String, dynamic>> tenantMemberships;
   final Map<String, dynamic>? platformMembership;
+  final bool hasInactiveMemberships;
 
   bool get isEmpty => tenantMemberships.isEmpty && platformMembership == null;
   bool get hasMultiple =>
@@ -1365,7 +1405,7 @@ class _AccessUserCardState extends State<_AccessUserCard> {
                           ),
                           DropdownMenuItem(
                             value: 'operator',
-                            child: Text('Operador'),
+                            child: Text('Agente'),
                           ),
                         ],
                         onChanged: (value) {
@@ -1868,13 +1908,24 @@ class TenantWorkspacePage extends StatelessWidget {
   final Map<String, dynamic> membership;
 
   Future<Map<String, dynamic>> _tenant() async {
-    return await Supabase.instance.client
+    final client = Supabase.instance.client;
+    final role = await client.rpc(
+      'current_tenant_role',
+      params: {'p_tenant_id': membership['tenant_id']},
+    ) as String?;
+    if (role == null) {
+      throw const AuthException(
+        'Tu acceso a esta empresa está desactivado o fue retirado.',
+      );
+    }
+    final tenant = await client
         .from('tenants')
         .select(
           'id, name, slug, sector, logo_url, language, timezone, created_at',
         )
         .eq('id', membership['tenant_id'])
         .single();
+    return {...tenant, '_current_role': role};
   }
 
   @override
@@ -1888,13 +1939,19 @@ class TenantWorkspacePage extends StatelessWidget {
           );
         }
         if (snapshot.hasError || !snapshot.hasData) {
-          return const ErrorPage(
-            message: 'No fue posible cargar los datos de la empresa.',
+          return ErrorPage(
+            message:
+                'No fue posible cargar los datos de la empresa.\n${snapshot.error}',
+            onRetry: () => (context as Element).markNeedsBuild(),
           );
         }
         final tenant = snapshot.data!;
         return TenantOperationsShell(
-          initialMembership: {...membership, 'tenants': tenant},
+          initialMembership: {
+            ...membership,
+            'role': tenant['_current_role'],
+            'tenants': tenant,
+          },
         );
       },
     );
@@ -1917,8 +1974,11 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   String _presence = 'available';
   List<Map<String, dynamic>> _notifications = [];
   RealtimeChannel? _notificationsChannel;
-  late final Future<List<Map<String, dynamic>>> _memberships =
-      _loadMemberships();
+  Timer? _accessTimer;
+  bool _checkingAccess = false;
+  bool _accessUnavailable = false;
+  String? _accessError;
+  late Future<List<Map<String, dynamic>>> _memberships = _loadMemberships();
   late final Future<Map<String, dynamic>?> _profile = _loadProfile();
 
   SupabaseClient get _client => Supabase.instance.client;
@@ -1928,13 +1988,51 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     super.initState();
     _loadNotifications();
     _subscribeToNotifications();
+    _accessTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshAccess(),
+    );
   }
 
   @override
   void dispose() {
     final channel = _notificationsChannel;
     if (channel != null) _client.removeChannel(channel);
+    _accessTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _refreshAccess() async {
+    if (_checkingAccess) return;
+    _checkingAccess = true;
+    final tenantId = _activeMembership['tenant_id'];
+    try {
+      final role = await _client.rpc(
+        'current_tenant_role',
+        params: {'p_tenant_id': tenantId},
+      ) as String?;
+      if (!mounted || tenantId != _activeMembership['tenant_id']) return;
+      setState(() {
+        _accessUnavailable = role == null;
+        _accessError = role == null
+            ? 'Tu acceso a esta empresa está desactivado o fue retirado.'
+            : null;
+        if (role != null && role != _role) {
+          _activeMembership = {..._activeMembership, 'role': role};
+          _selectedIndex = 0;
+          _memberships = _loadMemberships();
+        }
+      });
+    } catch (error) {
+      if (mounted && tenantId == _activeMembership['tenant_id']) {
+        setState(() {
+          _accessUnavailable = true;
+          _accessError = 'No fue posible verificar tu acceso. $error';
+        });
+      }
+    } finally {
+      _checkingAccess = false;
+    }
   }
 
   Future<void> _loadNotifications() async {
@@ -2003,11 +2101,11 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
         .select(
           'tenant_id, role, tenants(id, name, slug, sector, logo_url, language, timezone)',
         )
-        .eq('user_id', Supabase.instance.client.auth.currentUser!.id);
+        .eq('user_id', Supabase.instance.client.auth.currentUser!.id)
+        .eq('is_active', true);
     final memberships = List<Map<String, dynamic>>.from(
       rows.map((row) => Map<String, dynamic>.from(row)),
     );
-    if (memberships.isEmpty) return [widget.initialMembership];
     return memberships;
   }
 
@@ -2034,11 +2132,44 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     setState(() {
       _activeMembership = membership;
       _selectedIndex = 0;
+      _accessUnavailable = false;
+      _accessError = null;
     });
+    _refreshAccess();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_accessUnavailable) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Acceso a la empresa')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 48),
+                const SizedBox(height: 16),
+                Text(_accessError ?? 'Acceso no disponible.'),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _refreshAccess,
+                  child: const Text('Reintentar'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const AuthGate()),
+                    (_) => false,
+                  ),
+                  child: const Text('Volver a mis espacios'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final tenant = _activeMembership['tenants'] as Map<String, dynamic>;
     final modules = _modules;
     return Scaffold(
@@ -2342,7 +2473,7 @@ String _roleLabel(String role) {
     case 'supervisor':
       return 'Supervisor';
     default:
-      return 'Operador';
+      return 'Agente';
   }
 }
 
@@ -2361,6 +2492,7 @@ class _TenantModuleContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDashboard = module.label == 'Dashboard';
     final isWhatsApp = module.label == 'WhatsApp Business';
+    final isUsers = module.label == 'Usuarios y permisos';
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
@@ -2379,6 +2511,8 @@ class _TenantModuleContent extends StatelessWidget {
                 Text(
                   isDashboard
                       ? 'Resumen operativo de ${tenant['name']}.'
+                      : isUsers
+                      ? 'Administra el equipo y su acceso a ${tenant['name']}.'
                       : 'Módulo preparado para ${tenant['name']}.',
                 ),
                 const SizedBox(height: 28),
@@ -2407,8 +2541,15 @@ class _TenantModuleContent extends StatelessWidget {
                 if (module.label == 'Tickets') const _DemoTicketsPage(),
                 if (module.label == 'Agenda') const _DemoAgendaPage(),
                 if (module.label == 'Reportes') const _DemoReportsPage(),
+                if (isUsers)
+                  TenantUsersPanel(
+                    key: ValueKey(tenant['id']),
+                    tenantId: tenant['id'] as String,
+                    tenantName: tenant['name'] as String,
+                  ),
                 if (!isDashboard &&
                     !isWhatsApp &&
+                    !isUsers &&
                     module.label != 'Configuración' &&
                     module.label != 'Clientes' &&
                     module.label != 'Tickets' &&
