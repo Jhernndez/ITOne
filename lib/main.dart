@@ -3431,20 +3431,11 @@ class _IpsMetricCard extends StatelessWidget {
 }
 
 const _tenantSectors = <String, String>{
-  'general': 'Otro / General',
+  'general': 'General',
   'it_services': 'Servicios de TI',
-  'msp': 'MSP / Soporte administrado',
   'ips': 'IPS / Salud',
-  'therapy_center': 'Centro terapéutico',
-  'consulting': 'Consultoría',
-  'professional_services': 'Servicios profesionales',
   'logistics': 'Logística y transporte',
-  'construction': 'Construcción',
-  'education': 'Educación',
-  'retail': 'Comercio y ventas',
-  'manufacturing': 'Manufactura',
-  'real_estate': 'Inmobiliaria',
-  'nonprofit': 'Fundación / ONG',
+  'furniture_services': 'Servicios de Mueblería',
 };
 
 class _TenantBrand extends StatelessWidget {
