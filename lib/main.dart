@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
+import 'features/automations/automation_demo.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -2117,6 +2118,8 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     const _TenantModule('Dashboard', Icons.dashboard_outlined),
     const _TenantModule('Clientes', Icons.people_outline),
     const _TenantModule('WhatsApp Business', Icons.chat_outlined),
+    if (_role != 'operator')
+      const _TenantModule('Automatizaciones', Icons.account_tree_outlined),
     const _TenantModule('Tickets', Icons.confirmation_number_outlined),
     const _TenantModule('Agenda', Icons.calendar_month_outlined),
     if (_role != 'operator')
@@ -2495,6 +2498,7 @@ class _TenantModuleContent extends StatelessWidget {
     final isDashboard = module.label == 'Dashboard';
     final isWhatsApp = module.label == 'WhatsApp Business';
     final isUsers = module.label == 'Usuarios y permisos';
+    final isAutomations = module.label == 'Automatizaciones';
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
@@ -2515,6 +2519,8 @@ class _TenantModuleContent extends StatelessWidget {
                       ? 'Resumen operativo de ${tenant['name']}.'
                       : isUsers
                       ? 'Administra el equipo y su acceso a ${tenant['name']}.'
+                      : isAutomations
+                      ? 'Prueba respuestas automáticas sin enviar mensajes reales.'
                       : 'Módulo preparado para ${tenant['name']}.',
                 ),
                 const SizedBox(height: 28),
@@ -2549,9 +2555,15 @@ class _TenantModuleContent extends StatelessWidget {
                     tenantId: tenant['id'] as String,
                     tenantName: tenant['name'] as String,
                   ),
+                if (isAutomations)
+                  AutomationDemo(
+                    key: ValueKey(tenant['id']),
+                    tenantName: tenant['name'] as String,
+                  ),
                 if (!isDashboard &&
                     !isWhatsApp &&
                     !isUsers &&
+                    !isAutomations &&
                     module.label != 'Configuración' &&
                     module.label != 'Clientes' &&
                     module.label != 'Tickets' &&

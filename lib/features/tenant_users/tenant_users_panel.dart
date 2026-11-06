@@ -1155,6 +1155,10 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
                   'Abrir reportes (demostración)',
                   [TenantRole.administrator, TenantRole.supervisor],
                 ),
+                (
+                  'Probar automatizaciones (demostración)',
+                  [TenantRole.administrator, TenantRole.supervisor],
+                ),
               ])
                 DataRow(
                   cells: [
