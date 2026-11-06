@@ -165,6 +165,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Mensaje del cliente ficticio'),
       '',
     );
+    await tester.ensureVisible(find.text('Simular mensaje'));
     await tester.tap(find.text('Simular mensaje'));
     await tester.pumpAndSettle();
     expect(

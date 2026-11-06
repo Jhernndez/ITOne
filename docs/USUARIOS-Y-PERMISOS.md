@@ -15,6 +15,9 @@ empresa. Consulta las membresías reales de Supabase: no crea usuarios de muestr
   No elimina datos ni modifica el acceso a otras empresas.
 - Pestañas de roles y permisos de consulta. Los módulos operativos que todavía
   son demostraciones se identifican como tales.
+- En el [constructor de automatizaciones](AUTOMATIZACIONES-DEMO.md),
+  Administrador edita y publica para simulación; Supervisor consulta y prueba;
+  Agente no tiene acceso. Publicar no activa envíos de WhatsApp.
 - Desde **Editar acceso > Nombre y contraseña**, editar el nombre y,
   opcionalmente, asignar otra contraseña temporal. Dejarla vacía conserva la
   actual. Solo se admite para cuentas exclusivas de la empresa, sin membresías

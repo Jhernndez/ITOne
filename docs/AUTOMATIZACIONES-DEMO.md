@@ -1,39 +1,111 @@
-# Laboratorio de automatizaciones
+# Constructor de automatizaciones para simulación
 
-En el menú de empresa, **Automatizaciones** permite a administradores y
-supervisores demostrar respuestas sin depender de Meta.
+En **Automatizaciones**, cada empresa dispone de sus propios flujos, borradores
+y versiones. El editor tiene diseño propio: nodos arrastrables, conectores,
+ramificaciones, zoom y panel de configuración.
 
-Esta versión es exclusivamente una simulación local. No llama a Supabase,
-no envía WhatsApps ni usa contactos reales. Las reglas y resultados se descartan
-al salir del módulo, recargar o cambiar de empresa. No requiere migraciones ni
-Edge Functions nuevas.
+**Publicar para simulación no activa WhatsApp.** Ningún bloque de esta entrega
+envía mensajes, invoca APIs, procesa con IA ni asigna agentes reales. Usar solo
+ejemplos ficticios, sin datos personales ni clínicos reales.
 
-## Demostración
+## Activación
 
-1. Personalizar los textos de bienvenida y fuera de horario.
-2. Elegir apertura y cierre. Es un horario diario ficticio; puede cruzar
-   medianoche. La apertura se incluye y el cierre se excluye. No admite apertura
-   igual a cierre. No usa calendario semanal, festivos ni zona horaria real.
-3. En el simulador, elegir una hora y si la conversación es nueva.
-4. Escribir un mensaje ficticio y pulsar **Simular mensaje**.
-5. Revisar la respuesta y el recorrido de evaluación.
+Aplicar una vez en Supabase la migración
+[20261106183000_automation_flows.sql](../supabase/migrations/20261106183000_automation_flows.sql),
+después de las migraciones anteriores de usuarios y permisos. Luego publicar
+el frontend mediante GitHub / Cloudflare. No requiere Edge Functions nuevas.
+Cloudflare no aplica esta migración automáticamente.
 
-La atención humana detiene ambas reglas. Si no hay agente, la respuesta fuera
-de horario tiene prioridad 1 y la bienvenida prioridad 2. Solo se ejecuta la
-primera coincidencia. Si ninguna coincide, no hay respuesta automática.
-Cada prueba es independiente: no hay historial ni envío acumulativo.
+## Permisos y almacenamiento
 
-Cambiar los parámetros o textos descarta el resultado anterior para no mostrar
-una respuesta desactualizada.
+- Administrador activo: crear, editar, guardar borradores y publicar versiones
+  exclusivamente para simulación.
+- Supervisor activo: consultar y probar borradores y versiones, sin escritura.
+- Agente: no tiene acceso al constructor ni a sus tablas.
+- Las tablas `automation_flows` y `automation_flow_versions` tienen RLS basada en
+  `current_tenant_role`. Esto incluye membresías inactivas y bloqueos globales.
+- Las escrituras pasan por RPC administrativas. No se conceden escrituras
+  directas al cliente.
+- Cada guardado comprueba la revisión anterior para evitar sobrescribir cambios
+  de otro administrador. Ante conflicto, conservar los cambios que se necesiten
+  y recargar antes de volver a editar; recargar descarta el lienzo local.
+- Las versiones son instantáneas inmutables con número, autor, nombre y grafo.
+  Editar un borrador no cambia una versión ya publicada.
+- La conversación de prueba solo existe en memoria y se descarta al cerrarla.
+  Las modificaciones del lienzo solo persisten después de **Guardar borrador**.
+  Guardar antes de salir del módulo, cambiar de empresa o cerrar la pestaña.
 
-El recorrido con conectores es una representación fija de estas reglas, no un
-editor libre de nodos. Publicación de flujos, persistencia, colas, envíos reales
-y conexión con webhooks quedan fuera de esta demostración.
+## Uso del editor
+
+1. Pulsar **Nuevo flujo** o **Plantilla EPS / Particular**.
+2. Escribir un nombre. Añadir bloques desde la barra.
+3. Mover cada bloque arrastrando su icono o cabecera. Arrastrar el fondo para
+   desplazar el lienzo; usar zoom o **Restablecer vista**.
+4. Seleccionar un bloque y pulsar **Configurar bloque**.
+5. Para conectar, pulsar la salida del bloque y luego el bloque destino.
+   Alternativamente, usar los selectores de salida en el panel inferior.
+   Elegir otro destino sustituye la conexión de esa salida.
+6. Usar **Desconectar** o **Eliminar bloque** para retirar conexiones o nodos.
+   Cambiar los nombres de las opciones retira conexiones de salidas inexistentes:
+   volver a conectar esas ramas.
+7. **Guardar borrador** permite conservar trabajo incompleto. **Probar
+   automatización** valida y ejecuta una copia del grafo actual, incluidos cambios
+   aún no guardados. La copia no cambia si después se modifica el borrador.
+8. **Publicar para simulación** valida, guarda si hace falta y crea una versión.
+   En **Versiones**, elegir una versión para probar exactamente esa instantánea.
+
+### Bloques
+
+| Bloque | Comportamiento |
+|---|---|
+| Inicio | Único punto de entrada |
+| Enviar texto | Muestra el mensaje en la conversación ficticia |
+| Pregunta | Espera texto y guarda la respuesta en una variable |
+| Opciones | Muestra de 2 a 6 opciones únicas, separadas por `\|`; guarda la selección y sigue su rama |
+| Condición | Compara una variable existente con un valor, sin distinguir mayúsculas; ramas Sí / No |
+| API simulada | El probador elige Éxito o Error; no hace llamadas |
+| Revisión de agente | El probador elige Aprobada o Denegada; denegar exige motivo ficticio |
+| Transferir a humano | Termina la simulación con un aviso; no asigna agentes reales |
+| Finalizar | Termina el recorrido |
+
+Variables: identificadores de 1 a 40 caracteres, empezando por letra, con letras,
+números y `_`. Los mensajes pueden incluir `{{variable}}`. La denegación guarda
+`motivo_denegacion`. Referenciar una variable que no existe detiene la prueba
+con un error explícito; no inventa información.
+
+La validación exige un Inicio, ramas completas, destinos existentes, identificadores
+únicos, bloques alcanzables y ausencia de ciclos. Máximo 60 bloques, 180 conexiones
+y 1000 caracteres por campo de configuración; grafo almacenado de máximo 200 KB.
+La publicación también se valida en PostgreSQL, no solo en Flutter.
+
+## Ejemplo IPS / Salud
+
+La plantilla es editable, no un guion independiente del constructor:
+
+- EPS solicita EPS ficticia y servicio.
+- Particular solicita servicio y nombre ficticio de examen, o la respuesta
+  «No tengo». No admite documentos.
+- Ambas ramas llegan a una API simulada.
+- Error: mensaje de fallo y transferencia humana, sin confirmar solicitud.
+- Éxito: revisión simulada. Aprobada deja la solicitud pendiente sin confirmar
+  cita. Denegada muestra el motivo y deriva a atención humana.
+
+No se verifica cobertura, tarifa, autorización ni disponibilidad real.
+Las demostraciones locales anteriores de horario y conversación fija permanecen
+como ejemplos internos con sus pruebas; el menú ahora abre el constructor.
+
+## Fuera de alcance
+
+Envíos de WhatsApp, interpretación con IA, conectores externos reales, esperas
+durables, programación horaria y activación sobre webhooks requieren un motor
+de servidor adicional. Las versiones de esta entrega tienen `mode=simulation`.
+No hay ejecución automática ni publicación para producción.
 
 ## Validación
 
 ```powershell
-flutter test --no-pub test\automation_demo_test.dart
 flutter analyze --no-pub
+flutter test --no-pub test\flow_graph_test.dart test\flow_builder_test.dart
+npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\tests\automation_flows_test.ts
 flutter build web --no-pub
 ```

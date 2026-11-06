@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'patient_automation_demo.dart';
+
 enum DemoAutomation { outOfHours, welcome }
 
 class DemoAutomationResult {
@@ -105,6 +107,7 @@ class _AutomationDemoState extends State<AutomationDemo> {
   int _hour = 10;
   DemoAutomationResult? _result;
   String? _sentMessage;
+  bool _testingPatient = false;
 
   @override
   void dispose() {
@@ -177,26 +180,51 @@ class _AutomationDemoState extends State<AutomationDemo> {
           ),
         ),
         const SizedBox(height: 20),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final rules = _rules();
-            final preview = _preview();
-            if (constraints.maxWidth < 1000) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [rules, const SizedBox(height: 20), preview],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: rules),
-                const SizedBox(width: 20),
-                Expanded(child: preview),
-              ],
-            );
-          },
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: () =>
+                  setState(() => _testingPatient = !_testingPatient),
+              icon: Icon(
+                _testingPatient ? Icons.arrow_back : Icons.play_circle_outline,
+              ),
+              label: Text(
+                _testingPatient
+                    ? 'Volver a reglas de horario'
+                    : 'Probar automatización',
+              ),
+            ),
+          ],
         ),
+        const SizedBox(height: 20),
+        if (_testingPatient)
+          PatientAutomationDemo(
+            key: ValueKey(widget.tenantName),
+            tenantName: widget.tenantName,
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final rules = _rules();
+              final preview = _preview();
+              if (constraints.maxWidth < 1000) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [rules, const SizedBox(height: 20), preview],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: rules),
+                  const SizedBox(width: 20),
+                  Expanded(child: preview),
+                ],
+              );
+            },
+          ),
       ],
     ),
   );

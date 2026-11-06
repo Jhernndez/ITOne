@@ -7,7 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
-import 'features/automations/automation_demo.dart';
+import 'features/automations/flow_builder.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -2556,9 +2556,10 @@ class _TenantModuleContent extends StatelessWidget {
                     tenantName: tenant['name'] as String,
                   ),
                 if (isAutomations)
-                  AutomationDemo(
+                  FlowBuilder(
                     key: ValueKey(tenant['id']),
-                    tenantName: tenant['name'] as String,
+                    tenantId: tenant['id'] as String,
+                    canEdit: role == 'tenant_admin',
                   ),
                 if (!isDashboard &&
                     !isWhatsApp &&
