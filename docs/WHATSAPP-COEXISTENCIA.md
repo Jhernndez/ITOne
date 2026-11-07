@@ -98,6 +98,9 @@ En **Configuracion > WhatsApp > Plantillas**, el administrador puede seleccionar
 una cuenta de su empresa y listar, crear, editar o eliminar sus plantillas reales
 en Meta. No utiliza los secretos `WHATSAPP_REVIEW_*`, no envia mensajes y no
 modifica la conexion del numero ni su registro en el celular.
+Configuracion ocupa el ancho y la altura disponibles junto al menu principal;
+el listado de plantillas se desplaza dentro del panel, sin una altura fija de
+500 pixeles.
 
 Requisitos y despliegue:
 

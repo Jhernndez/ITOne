@@ -2525,6 +2525,33 @@ class _TenantModuleContent extends StatelessWidget {
         onToggleFullscreen: onToggleFlowFullscreen,
       );
     }
+    if (module.label == 'Configuración') {
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              module.label,
+              style: Theme.of(context).textTheme.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _TenantConfiguration(
+                tenant: tenant,
+                onSaved: (sector) {
+                  tenant['sector'] = sector;
+                },
+                onLogoSaved: (logoUrl) {
+                  tenant['logo_url'] = logoUrl;
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
@@ -2560,16 +2587,6 @@ class _TenantModuleContent extends StatelessWidget {
                 if (isWhatsApp)
                   _WhatsAppBusinessInbox(
                     tenantId: tenant['id'] as String,
-                  ),
-                if (module.label == 'Configuración')
-                  _TenantConfiguration(
-                    tenant: tenant,
-                    onSaved: (sector) {
-                      tenant['sector'] = sector;
-                    },
-                    onLogoSaved: (logoUrl) {
-                      tenant['logo_url'] = logoUrl;
-                    },
                   ),
                 if (module.label == 'Clientes') const _DemoClientsPage(),
                 if (module.label == 'Tickets') const _DemoTicketsPage(),
@@ -3849,8 +3866,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: SizedBox(
-        height: 500,
+      child: SizedBox.expand(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
