@@ -81,7 +81,8 @@ Para el video, mostrar ITONE enviando y el nuevo mensaje recibido en WhatsApp.
 Empezar la grabacion directamente en Prueba Meta, sin pasar por Integracion ni
 mostrar los identificadores y el numero de produccion.
 No mostrar tokens ni conversaciones ajenas. Para `whatsapp_business_management`,
-grabar por separado la creacion de una plantilla en WhatsApp Manager.
+grabar por separado la creacion de una plantilla desde Plantillas de ITONE
+o WhatsApp Manager.
 La aceptacion de la evidencia depende de Meta.
 
 Pruebas locales:
@@ -89,6 +90,65 @@ Pruebas locales:
 ```powershell
 flutter test --no-pub test\whatsapp_review_panel_test.dart
 npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\functions\_shared\whatsapp_review.test.ts supabase\tests\whatsapp_review_test.ts
+```
+
+## Plantillas de produccion por empresa
+
+En **Configuracion > WhatsApp > Plantillas**, el administrador puede seleccionar
+una cuenta de su empresa y listar, crear, editar o eliminar sus plantillas reales
+en Meta. No utiliza los secretos `WHATSAPP_REVIEW_*`, no envia mensajes y no
+modifica la conexion del numero ni su registro en el celular.
+
+Requisitos y despliegue:
+
+1. La cuenta debe tener su WABA y token propio guardados por el servidor en
+   `whatsapp_accounts`. El token necesita `whatsapp_business_management` y acceso
+   a ese WABA. Si falta o caduco, configurar las credenciales por el procedimiento
+   seguro del servidor; no hay respaldo con un token global o de Prueba Meta.
+2. Desplegar la funcion con autenticacion JWT habilitada:
+
+   ```powershell
+   supabase functions deploy manage-whatsapp-templates
+   ```
+
+3. Publicar el frontend. Este modulo no requiere nuevas migraciones SQL.
+   GitHub / Cloudflare no despliega automaticamente la funcion.
+
+El servidor vuelve a comprobar usuario, rol y empresa en cada peticion, carga
+solo las cuentas de ese tenant y verifica que la plantilla pertenece al WABA
+seleccionado antes de editar o eliminar. El token nunca se devuelve al cliente.
+Meta es la fuente de las plantillas y sus estados, sin copias locales en SQL.
+
+Contenido compatible con este editor:
+
+- Categorias **UTILITY** y **MARKETING**.
+- Idiomas `es`, `es_ES`, `es_MX`, `en_US`, `pt_BR`.
+- Encabezado de texto opcional (60 caracteres), cuerpo (1024) y pie opcional
+  sin variables (60).
+- Variables numericas consecutivas `{{1}}`, `{{2}}`, etc., con un ejemplo
+  ficticio por variable. El encabezado admite solo `{{1}}`.
+- Hasta tres botones: respuestas rapidas, o hasta dos URL HTTPS fijas y un
+  telefono internacional. No mezclar respuestas rapidas con enlaces/telefono.
+- Vista previa del contenido antes de enviarlo.
+
+Crear envia la plantilla a revision; el ID y estado mostrados son los de Meta,
+no una aprobacion local. Editar conserva nombre, idioma y categoria. Las
+plantillas multimedia, de autenticacion, con variables con nombre o botones
+avanzados se consultan aqui pero deben editarse en WhatsApp Manager para no
+perder componentes. Eliminar requiere confirmacion y apunta al ID e idioma
+seleccionados, no a todas las traducciones del mismo nombre.
+
+Meta decide aprobacion, recategorizacion, estados editables y limites de cambios.
+Los errores se muestran en pantalla; las mutaciones no se reintentan
+automaticamente. Si hay una respuesta ambigua, actualizar el listado antes de
+reintentar. Una plantilla aprobada en otro WABA no se transfiere a esta cuenta.
+No se garantiza que una plantilla nueva este aprobada o lista para enviar.
+
+Pruebas locales:
+
+```powershell
+flutter test --no-pub test\whatsapp_templates_panel_test.dart
+npx --yes --package=deno deno test --no-lock --allow-env supabase\functions\_shared\whatsapp_templates.test.ts
 ```
 
 ## 1. Preparar la app en Meta
