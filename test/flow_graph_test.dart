@@ -120,29 +120,116 @@ void main() {
     final third = FlowRun(graph)..answer('EPS');
     expect(third.messages.last.text, 'Mensaje cambiado');
   });
-  test('rejects missing branches, unreachable blocks, cycles and malformed configuration', () {
-    final missing = FlowGraph.patientTemplate()..edges.removeLast();
-    expect(missing.validate(), isNotEmpty);
-    final orphan = FlowGraph.blank()
-      ..nodes.add(FlowNode('orphan', FlowKind.end));
-    expect(orphan.validate().join(), contains('sin conexión'));
-    final cycle = FlowGraph(
+  test(
+    'rejects missing branches, unreachable blocks and malformed configuration',
+    () {
+      final missing = FlowGraph.patientTemplate()..edges.removeLast();
+      expect(missing.validate(), isNotEmpty);
+      final orphan = FlowGraph.blank()
+        ..nodes.add(FlowNode('orphan', FlowKind.end));
+      expect(orphan.validate().join(), contains('sin conexión'));
+      final cycle = FlowGraph(
+        [
+          FlowNode('s', FlowKind.start),
+          FlowNode('a', FlowKind.text, config: {'text': 'hola'}),
+        ],
+        [
+          const FlowEdge('s', 'Siguiente', 'a'),
+          const FlowEdge('a', 'Siguiente', 'a'),
+        ],
+      );
+      expect(cycle.validate(), isEmpty);
+      expect(() => FlowRun(cycle), throwsStateError);
+      final bad = FlowGraph.patientTemplate();
+      bad.node('coverage').config['options'] = 'EPS|EPS';
+      expect(bad.validate().join(), contains('únicas'));
+      bad.node('coverage').config['variable'] = 'variable invalida';
+      expect(bad.validate().join(), contains('variable no válida'));
+    },
+  );
+  test(
+    'question cycles can repeat and exit without an automatic infinite loop',
+    () {
+      final graph = FlowGraph(
+        [
+          FlowNode('s', FlowKind.start, x: -8000, y: -4000),
+          FlowNode(
+            'q',
+            FlowKind.options,
+            x: 12000,
+            y: 18000,
+            config: {
+              'text': '¿Continuar?',
+              'variable': 'opcion',
+              'options': 'Repetir|Salir',
+            },
+          ),
+          FlowNode('e', FlowKind.end),
+        ],
+        [
+          const FlowEdge('s', 'Siguiente', 'q'),
+          const FlowEdge('q', 'Repetir', 'q'),
+          const FlowEdge('q', 'Salir', 'e'),
+        ],
+      );
+      expect(graph.validate(), isEmpty);
+      final run = FlowRun(graph);
+      for (var i = 0; i < 120; i++) {
+        run.answer('Repetir');
+        expect(run.finished, isFalse);
+        expect(run.waiting.id, 'q');
+      }
+      run.answer('Salir');
+      expect(run.finished, isTrue);
+      expect(graph.copy().node('s').x, -8000);
+    },
+  );
+  test('long interactive cycles hit an explicit session budget', () {
+    final graph = FlowGraph(
       [
         FlowNode('s', FlowKind.start),
-        FlowNode('a', FlowKind.text, config: {'text': 'hola'}),
+        FlowNode(
+          'q',
+          FlowKind.question,
+          config: {'text': 'Dato', 'variable': 'dato'},
+        ),
       ],
       [
-        const FlowEdge('s', 'Siguiente', 'a'),
-        const FlowEdge('a', 'Siguiente', 'a'),
+        const FlowEdge('s', 'Siguiente', 'q'),
+        const FlowEdge('q', 'Siguiente', 'q'),
       ],
     );
-    expect(cycle.validate().join(), contains('ciclo'));
-    expect(() => FlowRun(cycle), throwsFormatException);
-    final bad = FlowGraph.patientTemplate();
-    bad.node('coverage').config['options'] = 'EPS|EPS';
-    expect(bad.validate().join(), contains('únicas'));
-    bad.node('coverage').config['variable'] = 'variable invalida';
-    expect(bad.validate().join(), contains('variable no válida'));
+    final run = FlowRun(graph);
+    for (var i = 0; i < 998; i++) {
+      run.answer('Prueba');
+    }
+    expect(() => run.answer('Otra'), throwsStateError);
+    expect(run.failed, isTrue);
+    expect(run.trace.length, lessThanOrEqualTo(1001));
+  });
+  test('automatic cycle reached after an answer fails without hanging or allowing a bypass', () {
+    final graph = FlowGraph(
+      [
+        FlowNode('s', FlowKind.start),
+        FlowNode(
+          'q',
+          FlowKind.question,
+          config: {'text': 'Dato', 'variable': 'dato'},
+        ),
+        FlowNode('t', FlowKind.text, config: {'text': 'Ciclo'}),
+      ],
+      [
+        const FlowEdge('s', 'Siguiente', 'q'),
+        const FlowEdge('q', 'Siguiente', 't'),
+        const FlowEdge('t', 'Siguiente', 't'),
+      ],
+    );
+    final run = FlowRun(graph);
+    expect(() => run.answer('Prueba'), throwsStateError);
+    expect(run.failed, isTrue);
+    expect(run.finished, isFalse);
+    expect(run.messages.length, lessThanOrEqualTo(102));
+    expect(() => run.answer('Otro intento'), throwsStateError);
   });
   test(
     'unknown placeholders fail explicitly instead of inventing missing data',

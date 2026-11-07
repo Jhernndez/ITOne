@@ -1974,6 +1974,7 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
   late Map<String, dynamic> _activeMembership = widget.initialMembership;
   int _selectedIndex = 0;
   bool _sidebarCollapsed = false;
+  bool _flowFullscreen = false;
   String _presence = 'available';
   List<Map<String, dynamic>> _notifications = [];
   RealtimeChannel? _notificationsChannel;
@@ -2177,9 +2178,11 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
     }
     final tenant = _activeMembership['tenants'] as Map<String, dynamic>;
     final modules = _modules;
+    final flowFullscreen = _flowFullscreen &&
+        modules[_selectedIndex].label == 'Automatizaciones';
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F8),
-      appBar: AppBar(
+      appBar: flowFullscreen ? null : AppBar(
         leading: IconButton(
           tooltip: 'Regresar',
           onPressed: () {
@@ -2277,7 +2280,9 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _TenantSidebar(
+          Visibility(
+            visible: !flowFullscreen,
+            child: _TenantSidebar(
             tenant: tenant,
             modules: modules,
             selectedIndex: _selectedIndex,
@@ -2288,12 +2293,17 @@ class _TenantOperationsShellState extends State<TenantOperationsShell> {
             }),
             onSelected: (index) => setState(() => _selectedIndex = index),
             onLogout: () => Supabase.instance.client.auth.signOut(),
+            ),
           ),
           Expanded(
             child: _TenantModuleContent(
               module: modules[_selectedIndex],
               tenant: tenant,
               role: _role,
+              flowFullscreen: flowFullscreen,
+              onToggleFlowFullscreen: () => setState(() {
+                _flowFullscreen = !_flowFullscreen;
+              }),
             ),
           ),
         ],
@@ -2487,11 +2497,15 @@ class _TenantModuleContent extends StatelessWidget {
     required this.module,
     required this.tenant,
     required this.role,
+    required this.flowFullscreen,
+    required this.onToggleFlowFullscreen,
   });
 
   final _TenantModule module;
   final Map<String, dynamic> tenant;
   final String role;
+  final bool flowFullscreen;
+  final VoidCallback onToggleFlowFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -2499,6 +2513,15 @@ class _TenantModuleContent extends StatelessWidget {
     final isWhatsApp = module.label == 'WhatsApp Business';
     final isUsers = module.label == 'Usuarios y permisos';
     final isAutomations = module.label == 'Automatizaciones';
+    if (isAutomations) {
+      return FlowBuilder(
+        key: ValueKey(tenant['id']),
+        tenantId: tenant['id'] as String,
+        canEdit: role == 'tenant_admin',
+        fullscreen: flowFullscreen,
+        onToggleFullscreen: onToggleFlowFullscreen,
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         padding: EdgeInsets.all(constraints.maxWidth > 900 ? 32 : 20),
@@ -2554,12 +2577,6 @@ class _TenantModuleContent extends StatelessWidget {
                     key: ValueKey(tenant['id']),
                     tenantId: tenant['id'] as String,
                     tenantName: tenant['name'] as String,
-                  ),
-                if (isAutomations)
-                  FlowBuilder(
-                    key: ValueKey(tenant['id']),
-                    tenantId: tenant['id'] as String,
-                    canEdit: role == 'tenant_admin',
                   ),
                 if (!isDashboard &&
                     !isWhatsApp &&

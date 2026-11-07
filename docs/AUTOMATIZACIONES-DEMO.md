@@ -1,8 +1,10 @@
 # Constructor de automatizaciones para simulación
 
 En **Automatizaciones**, cada empresa dispone de sus propios flujos, borradores
-y versiones. El editor tiene diseño propio: nodos arrastrables, conectores,
-ramificaciones, zoom y panel de configuración.
+y versiones. El editor ocupa toda el área disponible, sin el contenedor central
+ni el scroll de página de los otros módulos. En escritorio se organiza en
+biblioteca de componentes, lienzo y configuración lateral con edición directa.
+Los paneles tienen su propio scroll si su contenido es largo.
 
 **Publicar para simulación no activa WhatsApp.** Ningún bloque de esta entrega
 envía mensajes, invoca APIs, procesa con IA ni asigna agentes reales. Usar solo
@@ -14,7 +16,11 @@ Aplicar una vez en Supabase la migración
 [20261106183000_automation_flows.sql](../supabase/migrations/20261106183000_automation_flows.sql),
 después de las migraciones anteriores de usuarios y permisos. Luego publicar
 el frontend mediante GitHub / Cloudflare. No requiere Edge Functions nuevas.
-Cloudflare no aplica esta migración automáticamente.
+Después aplicar
+[20261106193000_expand_automation_canvas.sql](../supabase/migrations/20261106193000_expand_automation_canvas.sql):
+actualiza el validador para admitir coordenadas extendidas y ciclos. No recrea
+tablas ni modifica las instantáneas anteriores.
+Cloudflare no aplica estas migraciones automáticamente.
 
 ## Permisos y almacenamiento
 
@@ -38,12 +44,19 @@ Cloudflare no aplica esta migración automáticamente.
 ## Uso del editor
 
 1. Pulsar **Nuevo flujo** o **Plantilla EPS / Particular**.
-2. Escribir un nombre. Añadir bloques desde la barra.
+2. Escribir un nombre. Buscar componentes por nombre en la biblioteca y pulsar
+   uno para añadirlo, o arrastrarlo al lienzo. En pantallas estrechas, abrir la
+   biblioteca con el botón de componentes situado abajo en el lienzo.
 3. Mover cada bloque arrastrando su icono o cabecera. Arrastrar el fondo para
-   desplazar el lienzo; usar zoom o **Restablecer vista**.
-4. Seleccionar un bloque y pulsar **Configurar bloque**.
+   desplazar el lienzo sin bordes fijos; usar la rueda del ratón, pellizcar con
+   dos dedos o los botones de zoom. **Ajustar flujo** encuadra los bloques;
+   **Restablecer vista** vuelve al origen.
+4. Seleccionar un bloque y editar sus campos directamente en **Configuración**.
+   Los cambios se aplican al borrador mientras se escribe; guardar para
+   persistirlos. En pantallas estrechas, el panel aparece debajo del lienzo;
+   puede cerrarse para recuperar espacio.
 5. Para conectar, pulsar la salida del bloque y luego el bloque destino.
-   Alternativamente, usar los selectores de salida en el panel inferior.
+   Alternativamente, usar los selectores de salida en el panel de configuración.
    Elegir otro destino sustituye la conexión de esa salida.
 6. Usar **Desconectar** o **Eliminar bloque** para retirar conexiones o nodos.
    Cambiar los nombres de las opciones retira conexiones de salidas inexistentes:
@@ -53,6 +66,8 @@ Cloudflare no aplica esta migración automáticamente.
    aún no guardados. La copia no cambia si después se modifica el borrador.
 8. **Publicar para simulación** valida, guarda si hace falta y crea una versión.
    En **Versiones**, elegir una versión para probar exactamente esa instantánea.
+9. **Pantalla completa** oculta la cabecera y el menú de la aplicación sin
+   perder los cambios. **Salir de pantalla completa** los restaura.
 
 ### Bloques
 
@@ -74,7 +89,18 @@ números y `_`. Los mensajes pueden incluir `{{variable}}`. La denegación guard
 con un error explícito; no inventa información.
 
 La validación exige un Inicio, ramas completas, destinos existentes, identificadores
-únicos, bloques alcanzables y ausencia de ciclos. Máximo 60 bloques, 180 conexiones
+únicos y bloques alcanzables. Se puede volver a un bloque anterior, incluso al
+mismo bloque, excepto a Inicio. Una pregunta u opción dentro de un ciclo permite
+repetir una conversación y elegir cuándo salir. Un ciclo exclusivamente automático
+se detiene con un error explícito tras 100 pasos sin esperar una respuesta.
+La prueba completa tiene un límite de 1000 pasos para no consumir memoria
+indefinidamente; reiniciar la prueba para comenzar otra sesión.
+
+El lienzo se desplaza en ambas direcciones sin el antiguo borde de 2900 × 1800.
+Solo se dibuja la cuadrícula del área visible. El rango numérico de las posiciones
+es de -1000000000 a 1000000000 en ambos ejes: «infinito» describe la navegación,
+no una cantidad ilimitada de bloques ni de ejecución.
+Máximo 60 bloques, 180 conexiones
 y 1000 caracteres por campo de configuración; grafo almacenado de máximo 200 KB.
 La publicación también se valida en PostgreSQL, no solo en Flutter.
 

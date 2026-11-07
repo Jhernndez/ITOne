@@ -113,11 +113,9 @@ class FlowGraph {
     for (final n in nodes) {
       if (!n.x.isFinite ||
           !n.y.isFinite ||
-          n.x < 0 ||
-          n.y < 0 ||
-          n.x > 2600 ||
-          n.y > 1600) {
-        errors.add('${n.title}: posición fuera del lienzo.');
+          n.x.abs() > 1e9 ||
+          n.y.abs() > 1e9) {
+        errors.add('${n.title}: posición fuera del rango numérico admitido.');
       }
       if ([
             FlowKind.text,
@@ -166,27 +164,14 @@ class FlowGraph {
       }
     }
     final visited = <String>{};
-    final stack = <String>{};
-    bool cycle = false;
     void walk(String id) {
-      if (stack.contains(id)) {
-        cycle = true;
-        return;
-      }
       if (!ids.contains(id) || !visited.add(id)) return;
-      stack.add(id);
       for (final e in edges.where((e) => e.from == id)) {
         walk(e.to);
       }
-      stack.remove(id);
     }
 
     if (starts.length == 1) walk(starts.single.id);
-    if (cycle) {
-      errors.add(
-        'Hay un ciclo. Conecta el recorrido sin volver a bloques anteriores.',
-      );
-    }
     if (visited.length != nodes.length) {
       errors.add('Hay bloques sin conexión desde Inicio.');
     }
@@ -211,41 +196,41 @@ class FlowGraph {
     ) => FlowNode(id, kind, x: x, y: y, config: c);
     return FlowGraph(
       [
-        n('start', FlowKind.start, 60, 400, {}),
-        n('coverage', FlowKind.options, 360, 400, {
+        n('start', FlowKind.start, 450, 40, {}),
+        n('coverage', FlowKind.options, 450, 260, {
           'text': '¿Tu solicitud es por EPS o particular?',
           'variable': 'tipo',
           'options': 'EPS|Particular',
         }),
-        n('eps', FlowKind.question, 680, 180, {
+        n('eps', FlowKind.question, 100, 650, {
           'text': 'Indica tu EPS ficticia.',
           'variable': 'eps',
         }),
-        n('eps_service', FlowKind.question, 1000, 180, {
+        n('eps_service', FlowKind.question, 100, 970, {
           'text': '¿Qué servicio necesitas? Usa datos ficticios.',
           'variable': 'servicio',
         }),
-        n('service', FlowKind.question, 680, 650, {
+        n('service', FlowKind.question, 800, 650, {
           'text': '¿Qué servicio particular necesitas?',
           'variable': 'servicio',
         }),
-        n('exam', FlowKind.question, 1000, 650, {
+        n('exam', FlowKind.question, 800, 970, {
           'text': '¿Tienes examen médico? Indica su nombre ficticio o escribe "No tengo".',
           'variable': 'examen',
         }),
-        n('api', FlowKind.api, 1330, 400, {}),
-        n('review', FlowKind.review, 1650, 180, {}),
-        n('pending', FlowKind.text, 1970, 100, {
+        n('api', FlowKind.api, 450, 1300, {}),
+        n('review', FlowKind.review, 100, 1600, {}),
+        n('pending', FlowKind.text, 0, 1900, {
           'text': 'Revisión simulada completada. Solicitud pendiente, sin confirmar cita.',
         }),
-        n('denied', FlowKind.text, 1970, 410, {
+        n('denied', FlowKind.text, 400, 1900, {
           'text': 'Solicitud denegada. Motivo: {{motivo_denegacion}}. Puedes continuar con atención humana.',
         }),
-        n('error', FlowKind.text, 1650, 750, {
+        n('error', FlowKind.text, 800, 1600, {
           'text': 'No fue posible consultar el sistema. Transferimos a un agente, sin confirmar la solicitud.',
         }),
-        n('human', FlowKind.handoff, 2330, 650, {}),
-        n('end', FlowKind.end, 2330, 100, {}),
+        n('human', FlowKind.handoff, 650, 2250, {}),
+        n('end', FlowKind.end, 0, 2250, {}),
       ],
       [
         const FlowEdge('start', 'Siguiente', 'coverage'),
@@ -281,6 +266,7 @@ class FlowRun {
   late String current;
   bool finished = false;
   bool failed = false;
+  int _steps = 0;
   FlowNode get waiting => graph.node(current);
   String render(String text) => text.replaceAllMapped(
     RegExp(r'\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}'),
@@ -302,6 +288,11 @@ class FlowRun {
 
   void _advance() {
     for (var i = 0; i < 100; i++) {
+      if (++_steps > 1000) {
+        throw StateError(
+          'La prueba alcanzó 1000 pasos. Reinicia para continuar.',
+        );
+      }
       final n = waiting;
       switch (n.kind) {
         case FlowKind.start:
@@ -341,7 +332,10 @@ class FlowRun {
           return;
       }
     }
-    throw StateError('Se superó el límite de pasos de simulación.');
+    throw StateError(
+      'Ciclo automático: se alcanzaron 100 pasos sin esperar una respuesta. '
+      'Añade una pregunta o una salida al ciclo y reinicia la prueba.',
+    );
   }
 
   void answer(String value, {String reason = ''}) {

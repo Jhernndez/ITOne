@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'flow_graph.dart';
 import 'flow_repository.dart';
+import 'flow_canvas.dart';
 
 class FlowBuilder extends StatefulWidget {
   const FlowBuilder({
@@ -12,10 +13,14 @@ class FlowBuilder extends StatefulWidget {
     required this.tenantId,
     required this.canEdit,
     this.repository,
+    this.fullscreen = false,
+    this.onToggleFullscreen,
   });
   final String tenantId;
   final bool canEdit;
   final FlowRepository? repository;
+  final bool fullscreen;
+  final VoidCallback? onToggleFullscreen;
   @override
   State<FlowBuilder> createState() => _FlowBuilderState();
 }
@@ -25,6 +30,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
       widget.repository ?? FlowRepository(Supabase.instance.client);
   final _name = TextEditingController(text: 'Nuevo flujo');
   final _transform = TransformationController();
+  final _canvasKey = GlobalKey();
   FlowGraph _graph = FlowGraph.blank();
   List<SavedFlow> _flows = [];
   SavedFlow? _saved;
@@ -36,6 +42,11 @@ class _FlowBuilderState extends State<FlowBuilder> {
   bool _busy = true;
   bool _dirty = false;
   int _counter = 0;
+  final _componentSearch = TextEditingController();
+  bool _libraryOpen = false;
+  final Map<String, GlobalKey> _nodeKeys = {};
+  final Map<String, Size> _nodeSizes = {};
+  Offset? _dragPoint;
 
   @override
   void initState() {
@@ -46,6 +57,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
   @override
   void dispose() {
     _name.dispose();
+    _componentSearch.dispose();
     _transform.dispose();
     super.dispose();
   }
@@ -70,6 +82,9 @@ class _FlowBuilderState extends State<FlowBuilder> {
     _transform.value = Matrix4.identity();
     _notice = null;
     _error = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fit();
+    });
   }
 
   Future<bool> _discard() async {
@@ -208,9 +223,12 @@ class _FlowBuilderState extends State<FlowBuilder> {
       _transform.value = Matrix4.identity();
       _changed();
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fit();
+    });
   }
 
-  void _add(FlowKind kind) {
+  void _add(FlowKind kind, {Offset? at}) {
     if (_graph.nodes.length >= 60) {
       setState(() => _error = 'Máximo 60 bloques por flujo.');
       return;
@@ -233,16 +251,20 @@ class _FlowBuilderState extends State<FlowBuilder> {
       FlowKind.condition => {'variable': 'tipo', 'equals': 'EPS'},
       _ => <String, String>{},
     };
-    final position = _transform.toScene(const Offset(150, 100));
+    final position = _transform.toScene(at ?? const Offset(80, 60));
+    if (!position.dx.isFinite ||
+        !position.dy.isFinite ||
+        position.dx.abs() > 1e9 ||
+        position.dy.abs() > 1e9) {
+      setState(
+        () =>
+            _error = 'Vuelve a una zona dentro del rango numérico del lienzo.',
+      );
+      return;
+    }
     setState(() {
       _graph.nodes.add(
-        FlowNode(
-          id,
-          kind,
-          x: position.dx.clamp(0, 2600),
-          y: position.dy.clamp(0, 1600),
-          config: config,
-        ),
+        FlowNode(id, kind, x: position.dx, y: position.dy, config: config),
       );
       _selected = id;
       _changed();
@@ -251,8 +273,8 @@ class _FlowBuilderState extends State<FlowBuilder> {
 
   void _connect(String target) {
     final source = _connecting!;
-    if (source.node == target || _graph.node(target).kind == FlowKind.start) {
-      setState(() => _error = 'Elige otro bloque que no sea Inicio.');
+    if (_graph.node(target).kind == FlowKind.start) {
+      setState(() => _error = 'Conecta a un bloque distinto de Inicio.');
       return;
     }
     setState(() {
@@ -265,92 +287,15 @@ class _FlowBuilderState extends State<FlowBuilder> {
     });
   }
 
-  Future<void> _configure(FlowNode node) async {
-    final fields = <String, String>{
-      'title': 'Nombre del bloque',
-      if ([
-        FlowKind.text,
-        FlowKind.question,
-        FlowKind.options,
-      ].contains(node.kind))
-        'text': 'Mensaje',
-      if ([
-        FlowKind.question,
-        FlowKind.options,
-        FlowKind.condition,
-      ].contains(node.kind))
-        'variable': 'Variable',
-      if (node.kind == FlowKind.options) 'options': 'Opciones separadas por |',
-      if (node.kind == FlowKind.condition) 'equals': 'Es igual a',
-    };
-    final controllers = {
-      for (final key in fields.keys)
-        key: TextEditingController(text: node.config[key] ?? ''),
-    };
-    final route = DialogRoute<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Configurar ${node.kind.label}'),
-        content: SizedBox(
-          width: 440,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final entry in fields.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: TextField(
-                      controller: controllers[entry.key],
-                      maxLength: 1000,
-                      minLines: entry.key == 'text' ? 3 : 1,
-                      maxLines: entry.key == 'text' ? 5 : 1,
-                      decoration: InputDecoration(
-                        labelText: entry.value,
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                const Text(
-                  'Variables: letras, números y _. Puedes usar {{variable}} en los mensajes. '
-                  'No ingreses datos personales o de salud reales.',
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Aplicar bloque'),
-          ),
-        ],
-      ),
-    );
-    try {
-      final confirmed = await Navigator.of(context).push(route) ?? false;
-      await route.completed;
-      if (confirmed && mounted) {
-        setState(() {
-          for (final entry in controllers.entries) {
-            node.config[entry.key] = entry.value.text.trim();
-          }
-          _graph.edges.removeWhere(
-            (e) => e.from == node.id && !node.ports.contains(e.port),
-          );
-          _connecting = null;
-          _changed();
-        });
-      }
-    } finally {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-    }
+  void _configure(FlowNode node, Map<String, String> values) {
+    setState(() {
+      node.config.addAll(values);
+      _graph.edges.removeWhere(
+        (e) => e.from == node.id && !node.ports.contains(e.port),
+      );
+      _connecting = null;
+      _changed();
+    });
   }
 
   Future<void> _test(FlowGraph graph, String label) async {
@@ -433,248 +378,519 @@ class _FlowBuilderState extends State<FlowBuilder> {
   @override
   Widget build(BuildContext context) {
     final selected = _selected == null ? null : _graph.node(_selected!);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text(
-          'Constructor de flujos',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Modo simulación · Publicar no activa WhatsApp ni consulta APIs. '
-          'Usa solo datos ficticios. Guarda antes de salir: los cambios sin guardar se pierden.',
-        ),
-        if (!widget.canEdit)
-          const Text(
-            'Supervisor: consulta y prueba. Solo el administrador puede editar o publicar.',
-          ),
-        const SizedBox(height: 16),
-        if (_busy) const LinearProgressIndicator(),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        if (_notice != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(_notice!),
-          ),
-        if (_validation.isNotEmpty)
-          Card(
-            color: const Color(0xFFFFEEEE),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Corrige el flujo antes de probar o publicar:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  for (final error in _validation) Text('• $error'),
-                ],
-              ),
-            ),
-          ),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            if (_flows.isNotEmpty)
-              SizedBox(
-                width: 240,
-                child: DropdownButtonFormField<String>(
-                  key: UniqueKey(),
-                  initialValue: _saved?.id,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Flujo de esta empresa',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _flows
-                      .map(
-                        (f) => DropdownMenuItem(
-                          value: f.id,
-                          child: Text(f.name, overflow: TextOverflow.ellipsis),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _busy
-                      ? null
-                      : (id) async {
-                          if (id == null || id == _saved?.id) return;
-                          if (!await _discard() || !mounted) {
-                            if (mounted) setState(() {});
-                            return;
-                          }
-                          setState(
-                            () => _select(_flows.firstWhere((f) => f.id == id)),
-                          );
-                        },
-                ),
-              ),
-            if (widget.canEdit) ...[
-              OutlinedButton(
-                onPressed: _busy ? null : () => _new(false),
-                child: const Text('Nuevo flujo'),
-              ),
-              OutlinedButton(
-                onPressed: _busy ? null : () => _new(true),
-                child: const Text('Plantilla EPS / Particular'),
-              ),
-              FilledButton(
-                onPressed: _busy ? null : _save,
-                child: const Text('Guardar borrador'),
-              ),
-              OutlinedButton(
-                onPressed: _busy ? null : () => _save(publish: true),
-                child: const Text('Publicar para simulación'),
-              ),
-            ],
-            OutlinedButton(
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      if (await _discard() && mounted) await _load();
-                    },
-              child: const Text('Recargar'),
-            ),
-            OutlinedButton(
-              onPressed: _busy || _saved == null ? null : _versions,
-              child: const Text('Versiones'),
-            ),
-            FilledButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => _test(_graph, 'Borrador · ${_name.text}'),
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Probar automatización'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _name,
-          enabled: widget.canEdit && !_busy,
-          maxLength: 100,
-          decoration: InputDecoration(
-            labelText: 'Nombre del flujo',
-            helperText:
-                '${_dirty
-                    ? 'Cambios sin guardar'
-                    : _saved == null
-                    ? 'Flujo local, todavía no guardado'
-                    : 'Guardado · revisión ${_saved!.revision}'}'
-                '${_saved?.publishedVersion == null ? '' : ' · versión publicada ${_saved!.publishedVersion} (simulación)'}',
-            border: const OutlineInputBorder(),
-          ),
-          onChanged: (_) => setState(_changed),
-        ),
-        const SizedBox(height: 12),
-        if (widget.canEdit)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final kind in FlowKind.values)
-                ActionChip(
-                  avatar: Icon(_icon(kind), size: 18),
-                  label: Text('+ ${kind.label}'),
-                  onPressed: _busy ? null : () => _add(kind),
-                ),
-            ],
-          ),
-        const SizedBox(height: 12),
-        const Text(
-          'Arrastra los bloques desde su icono. Desplaza o amplía el lienzo. '
-          'Para conectar: pulsa una salida y luego el bloque destino; también puedes usar el panel de conexiones.',
-        ),
-        if (_connecting != null)
+    final compact = MediaQuery.sizeOf(context).width < 1000;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      bool changed = false;
+      for (final node in _graph.nodes) {
+        final size = _nodeKeys[node.id]?.currentContext?.size;
+        if (size != null && _nodeSizes[node.id] != size) {
+          _nodeSizes[node.id] = size;
+          changed = true;
+        }
+      }
+      if (changed) setState(() {});
+    });
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Row(
             children: [
-              Expanded(
+              const Expanded(
                 child: Text(
-                  'Conectando: ${_graph.node(_connecting!.node).title} → ${_connecting!.port}. Elige destino.',
+                  'Constructor · Solo simulación',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
-              TextButton(
-                onPressed: () => setState(() => _connecting = null),
-                child: const Text('Cancelar conexión'),
+              if (widget.canEdit)
+                _action(
+                  'Guardar borrador',
+                  Icons.save_outlined,
+                  _busy ? null : _save,
+                  compact,
+                ),
+              _action(
+                'Probar automatización',
+                Icons.play_arrow,
+                _busy ? null : () => _test(_graph, 'Borrador · ${_name.text}'),
+                compact,
               ),
+              if (widget.canEdit)
+                _action(
+                  'Publicar para simulación',
+                  Icons.rocket_launch_outlined,
+                  _busy ? null : () => _save(publish: true),
+                  compact,
+                ),
+              const Tooltip(
+                message:
+                    'Publicar no activa WhatsApp ni consulta APIs. Usa datos ficticios. '
+                    'Guarda antes de salir. Supervisor: solo consulta y prueba.',
+                child: Icon(Icons.info_outline, size: 20),
+              ),
+              if (widget.onToggleFullscreen != null)
+                IconButton(
+                  tooltip: widget.fullscreen
+                      ? 'Salir de pantalla completa'
+                      : 'Pantalla completa',
+                  onPressed: widget.onToggleFullscreen,
+                  icon: Icon(
+                    widget.fullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                  ),
+                ),
             ],
           ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          children: [
-            IconButton(
-              tooltip: 'Acercar lienzo',
-              onPressed: () => _zoom(1.2),
-              icon: const Icon(Icons.zoom_in),
+          if (_busy) const LinearProgressIndicator(),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
-            IconButton(
-              tooltip: 'Alejar lienzo',
-              onPressed: () => _zoom(1 / 1.2),
-              icon: const Icon(Icons.zoom_out),
+          if (_notice != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(_notice!),
             ),
-            TextButton(
-              onPressed: () => _transform.value = Matrix4.identity(),
-              child: const Text('Restablecer vista'),
-            ),
-          ],
-        ),
-        SizedBox(
-          height: 540,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: ColoredBox(
-              color: const Color(0xFFF2F5FB),
-              child: InteractiveViewer(
-                transformationController: _transform,
-                constrained: false,
-                minScale: .25,
-                maxScale: 2,
-                boundaryMargin: const EdgeInsets.all(200),
-                child: SizedBox(
-                  width: 2900,
-                  height: 1800,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(painter: _Connections(_graph)),
-                      ),
-                      for (final node in _graph.nodes)
-                        Positioned(
-                          left: node.x,
-                          top: node.y,
-                          width: 240,
-                          child: _nodeCard(node),
+          if (_validation.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 100),
+              child: SingleChildScrollView(
+                child: Card(
+                  color: const Color(0xFFFFEEEE),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Corrige el flujo antes de probar o publicar:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
-                    ],
+                        for (final error in _validation) Text('• $error'),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              spacing: 10,
+              children: [
+                SizedBox(
+                  width: 260,
+                  child: TextField(
+                    controller: _name,
+                    enabled: widget.canEdit && !_busy,
+                    maxLength: 100,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      labelText: 'Nombre del flujo',
+                      counterText: '',
+                      helperText: _dirty
+                          ? 'Cambios sin guardar'
+                          : _saved == null
+                          ? 'Todavía no guardado'
+                          : 'Guardado · revisión ${_saved!.revision}',
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(_changed),
+                  ),
+                ),
+                if (_flows.isNotEmpty)
+                  SizedBox(
+                    width: 240,
+                    child: DropdownButtonFormField<String>(
+                      key: UniqueKey(),
+                      initialValue: _saved?.id,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: 'Flujo de esta empresa',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _flows
+                          .map(
+                            (f) => DropdownMenuItem(
+                              value: f.id,
+                              child: Text(
+                                f.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _busy
+                          ? null
+                          : (id) async {
+                              if (id == null || id == _saved?.id) return;
+                              if (!await _discard() || !mounted) {
+                                if (mounted) setState(() {});
+                                return;
+                              }
+                              setState(
+                                () => _select(
+                                  _flows.firstWhere((f) => f.id == id),
+                                ),
+                              );
+                            },
+                    ),
+                  ),
+                if (widget.canEdit) ...[
+                  OutlinedButton(
+                    onPressed: _busy ? null : () => _new(false),
+                    child: const Text('Nuevo flujo'),
+                  ),
+                  OutlinedButton(
+                    onPressed: _busy ? null : () => _new(true),
+                    child: const Text('Plantilla EPS / Particular'),
+                  ),
+                ],
+                OutlinedButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          if (await _discard() && mounted) await _load();
+                        },
+                  child: const Text('Recargar'),
+                ),
+                OutlinedButton(
+                  onPressed: _busy || _saved == null ? null : _versions,
+                  child: const Text('Versiones'),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (selected != null) _inspector(selected),
-      ],
+          const SizedBox(height: 6),
+          if (_connecting != null)
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Conectando: ${_graph.node(_connecting!.node).title} → ${_connecting!.port}. Elige destino.',
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _connecting = null),
+                  child: const Text('Cancelar conexión'),
+                ),
+              ],
+            ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 1100;
+                final panel = Material(
+                  elevation: 4,
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const SizedBox(width: 12),
+                          const Expanded(child: Text('Configuración')),
+                          IconButton(
+                            tooltip: 'Cerrar panel',
+                            onPressed: selected == null
+                                ? null
+                                : () => setState(() => _selected = null),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: selected == null
+                              ? const Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: Text(
+                                    'Selecciona un bloque para editar su mensaje, variables y conexiones.',
+                                  ),
+                                )
+                              : _inspector(selected),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+                final canvas = Stack(
+                  children: [
+                    Positioned.fill(
+                      child: DragTarget<FlowKind>(
+                        onWillAcceptWithDetails: (_) =>
+                            widget.canEdit && !_busy,
+                        onAcceptWithDetails: (details) {
+                          final box =
+                              _canvasKey.currentContext!.findRenderObject()
+                                  as RenderBox;
+                          _add(
+                            details.data,
+                            at: box.globalToLocal(details.offset),
+                          );
+                        },
+                        builder: (context, candidates, rejected) => FlowCanvas(
+                          key: _canvasKey,
+                          graph: _graph,
+                          controller: _transform,
+                          connections: _Connections(_graph, Map.of(_nodeSizes)),
+                          nodeBuilder: _nodeCard,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: Material(
+                        elevation: 2,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!wide && widget.canEdit)
+                              IconButton(
+                                tooltip: 'Biblioteca de componentes',
+                                onPressed: () => setState(
+                                  () => _libraryOpen = !_libraryOpen,
+                                ),
+                                icon: const Icon(Icons.widgets_outlined),
+                              ),
+                            IconButton(
+                              tooltip: 'Acercar lienzo',
+                              onPressed: () => _zoom(1.2),
+                              icon: const Icon(Icons.zoom_in),
+                            ),
+                            IconButton(
+                              tooltip: 'Alejar lienzo',
+                              onPressed: () => _zoom(1 / 1.2),
+                              icon: const Icon(Icons.zoom_out),
+                            ),
+                            IconButton(
+                              tooltip: 'Ajustar flujo',
+                              onPressed: _fit,
+                              icon: const Icon(Icons.center_focus_strong),
+                            ),
+                            IconButton(
+                              tooltip: 'Restablecer vista',
+                              onPressed: () =>
+                                  _transform.value = Matrix4.identity(),
+                              icon: const Icon(Icons.restart_alt),
+                            ),
+                            const Tooltip(
+                              message:
+                                  'Arrastra el fondo para mover el lienzo. Rueda o pellizca para zoom. '
+                                  'Arrastra la cabecera de un bloque para moverlo. Pulsa una salida y luego el destino para conectar.',
+                              child: Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Icon(Icons.help_outline),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (!wide && _libraryOpen && widget.canEdit)
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 60,
+                        width: 230,
+                        child: _library(),
+                      ),
+                  ],
+                );
+                if (wide) {
+                  return Row(
+                    children: [
+                      if (widget.canEdit)
+                        SizedBox(width: 210, child: _library()),
+                      Expanded(child: canvas),
+                      SizedBox(width: 330, child: panel),
+                    ],
+                  );
+                }
+                if (selected == null) return canvas;
+                return Column(
+                  children: [
+                    Expanded(child: canvas),
+                    SizedBox(
+                      height: math.min(260, constraints.maxHeight * .45),
+                      child: panel,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 
+  Widget _action(
+    String label,
+    IconData icon,
+    VoidCallback? callback,
+    bool compact,
+  ) => compact
+      ? IconButton(tooltip: label, onPressed: callback, icon: Icon(icon))
+      : Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: OutlinedButton.icon(
+            onPressed: callback,
+            icon: Icon(icon, size: 18),
+            label: Text(label),
+          ),
+        );
+
+  Widget _library() {
+    const groups = {
+      'Inicio': [FlowKind.start],
+      'Mensajes': [FlowKind.text],
+      'Preguntas y respuestas': [FlowKind.question, FlowKind.options],
+      'Condiciones': [FlowKind.condition],
+      'Conexiones API': [FlowKind.api],
+      'Atención humana': [FlowKind.review, FlowKind.handoff],
+      'Cierre': [FlowKind.end],
+    };
+    final matching = FlowKind.values
+        .where(
+          (kind) => kind.label.toLowerCase().contains(
+            _componentSearch.text.toLowerCase(),
+          ),
+        )
+        .toSet();
+    return Material(
+      color: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'Biblioteca de componentes',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: TextField(
+              controller: _componentSearch,
+              decoration: const InputDecoration(
+                hintText: 'Buscar componentes',
+                isDense: true,
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView(
+              children: [
+                if (matching.isEmpty)
+                  const ListTile(title: Text('Sin componentes')),
+                for (final group in groups.entries)
+                  if (group.value.any(matching.contains)) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+                      child: Text(
+                        group.key,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    for (final kind in group.value.where(matching.contains))
+                      Draggable<FlowKind>(
+                        data: kind,
+                        dragAnchorStrategy: pointerDragAnchorStrategy,
+                        maxSimultaneousDrags: _busy ? 0 : 1,
+                        feedback: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(kind.label),
+                          ),
+                        ),
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(
+                            _icon(kind),
+                            color: _color(kind),
+                            size: 20,
+                          ),
+                          title: Text(
+                            '+ ${kind.label}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onTap: _busy
+                              ? null
+                              : () {
+                                  _add(kind);
+                                  setState(() => _libraryOpen = false);
+                                },
+                        ),
+                      ),
+                  ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _fit() {
+    final box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || _graph.nodes.isEmpty) return;
+    final left = _graph.nodes.map((n) => n.x).reduce(math.min);
+    final top = _graph.nodes.map((n) => n.y).reduce(math.min);
+    final right = _graph.nodes.map((n) => n.x + 260).reduce(math.max);
+    final bottom = _graph.nodes
+        .map((n) => n.y + (_nodeSizes[n.id]?.height ?? 300))
+        .reduce(math.max);
+    final width = math.max(100.0, box.size.width - 48);
+    final height = math.max(100.0, box.size.height - 90);
+    final scale = math
+        .min(width / (right - left), height / (bottom - top))
+        .clamp(.15, 2.0);
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(
+        24 + (width - (right - left) * scale) / 2 - left * scale,
+        24 + (height - (bottom - top) * scale) / 2 - top * scale,
+        0,
+        1,
+      )
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
   void _zoom(double factor) {
-    final current = _transform.value.getMaxScaleOnAxis();
-    final next = (current * factor).clamp(.25, 2.0);
-    final matrix = _transform.value.clone()
-      ..scaleByDouble(next / current, next / current, 1, 1);
-    _transform.value = matrix;
+    final current = _transform.value.entry(0, 0);
+    final next = (current * factor).clamp(.15, 2.0);
+    final size = _canvasKey.currentContext?.size;
+    final focal = size == null ? Offset.zero : size.center(Offset.zero);
+    final scene = _transform.toScene(focal);
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(
+        focal.dx - scene.dx * next,
+        focal.dy - scene.dy * next,
+        0,
+        1,
+      )
+      ..scaleByDouble(next, next, 1, 1);
   }
 
   Widget _nodeCard(FlowNode node) => GestureDetector(
@@ -687,6 +903,11 @@ class _FlowBuilderState extends State<FlowBuilder> {
       }
     },
     child: Card(
+      key: _nodeKeys.putIfAbsent(node.id, GlobalKey.new),
+      color: Color.alphaBlend(
+        _color(node.kind).withValues(alpha: .08),
+        Colors.white,
+      ),
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -703,27 +924,47 @@ class _FlowBuilderState extends State<FlowBuilder> {
           children: [
             GestureDetector(
               key: ValueKey('drag-${node.id}'),
+              onPanStart: !widget.canEdit || _busy
+                  ? null
+                  : (details) {
+                      _dragPoint = details.globalPosition;
+                    },
+              onPanEnd: !widget.canEdit || _busy
+                  ? null
+                  : (_) => _dragPoint = null,
+              onPanCancel: !widget.canEdit || _busy
+                  ? null
+                  : () => _dragPoint = null,
               onPanUpdate: !widget.canEdit || _busy
                   ? null
                   : (details) {
-                      final scale = _transform.value.getMaxScaleOnAxis();
+                      final scale = _transform.value.entry(0, 0);
+                      final delta =
+                          details.globalPosition -
+                          (_dragPoint ?? details.globalPosition);
+                      _dragPoint = details.globalPosition;
                       setState(() {
-                        node.x = (node.x + details.delta.dx / scale).clamp(
-                          0,
-                          2600,
-                        );
-                        node.y = (node.y + details.delta.dy / scale).clamp(
-                          0,
-                          1600,
-                        );
+                        final x = node.x + delta.dx / scale;
+                        final y = node.y + delta.dy / scale;
+                        if (x.abs() > 1e9 || y.abs() > 1e9) {
+                          _error = 'Se alcanzó el rango numérico del lienzo.';
+                          return;
+                        }
+                        node.x = x;
+                        node.y = y;
                         _changed();
                       });
                     },
               child: Row(
                 children: [
                   CircleAvatar(
+                    radius: 16,
                     backgroundColor: _color(node.kind),
-                    child: Icon(_icon(node.kind), color: Colors.white),
+                    child: Icon(
+                      _icon(node.kind),
+                      color: Colors.white,
+                      size: 19,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -749,11 +990,20 @@ class _FlowBuilderState extends State<FlowBuilder> {
                 node.config['text']!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
               ),
             for (final port in node.ports)
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(40, 28),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   onPressed: !widget.canEdit || _busy
                       ? null
                       : () => setState(() {
@@ -783,12 +1033,6 @@ class _FlowBuilderState extends State<FlowBuilder> {
             children: [
               if (widget.canEdit)
                 TextButton.icon(
-                  onPressed: _busy ? null : () => _configure(node),
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Configurar bloque'),
-                ),
-              if (widget.canEdit)
-                TextButton.icon(
                   onPressed: _busy || node.kind == FlowKind.start
                       ? null
                       : () => setState(() {
@@ -804,6 +1048,17 @@ class _FlowBuilderState extends State<FlowBuilder> {
                   label: const Text('Eliminar bloque'),
                 ),
             ],
+          ),
+          _NodeConfiguration(
+            key: ObjectKey(node),
+            node: node,
+            enabled: widget.canEdit && !_busy,
+            onChanged: (values) => _configure(node, values),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Salidas del componente',
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
           for (final port in node.ports)
             Padding(
@@ -825,9 +1080,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
                         border: const OutlineInputBorder(),
                       ),
                       items: _graph.nodes
-                          .where(
-                            (n) => n.id != node.id && n.kind != FlowKind.start,
-                          )
+                          .where((n) => n.kind != FlowKind.start)
                           .map(
                             (n) => DropdownMenuItem(
                               value: n.id,
@@ -881,24 +1134,20 @@ IconData _icon(FlowKind kind) => switch (kind) {
   FlowKind.end => Icons.flag_outlined,
 };
 Color _color(FlowKind kind) => switch (kind) {
-  FlowKind.start => const Color(0xFF1765CE),
-  FlowKind.api => const Color(0xFF8859CC),
-  FlowKind.condition || FlowKind.options => const Color(0xFF309D80),
+  FlowKind.start => const Color(0xFF23A95B),
+  FlowKind.api => const Color(0xFF159DB5),
+  FlowKind.question || FlowKind.options => const Color(0xFF8859CC),
+  FlowKind.condition => const Color(0xFF309D80),
   FlowKind.review || FlowKind.handoff => const Color(0xFFCF8634),
   _ => const Color(0xFF5376BA),
 };
 
 class _Connections extends CustomPainter {
-  _Connections(this.graph);
+  _Connections(this.graph, this.sizes);
   final FlowGraph graph;
+  final Map<String, Size> sizes;
   @override
   void paint(Canvas canvas, Size size) {
-    final dots = Paint()..color = const Color(0xFFD8DFED);
-    for (double x = 20; x < size.width; x += 30) {
-      for (double y = 20; y < size.height; y += 30) {
-        canvas.drawCircle(Offset(x, y), 1, dots);
-      }
-    }
     final paint = Paint()
       ..color = const Color(0xFF8A9CBD)
       ..style = PaintingStyle.stroke
@@ -906,20 +1155,29 @@ class _Connections extends CustomPainter {
     for (final e in graph.edges) {
       final from = graph.node(e.from);
       final to = graph.node(e.to);
-      final a = Offset(from.x + 240, from.y + 55);
-      final b = Offset(to.x, to.y + 35);
-      final bend = math.max(60.0, (a.dx - b.dx).abs() / 2);
-      canvas.drawPath(
-        Path()
-          ..moveTo(a.dx, a.dy)
-          ..cubicTo(a.dx + bend, a.dy, b.dx - bend, b.dy, b.dx, b.dy),
-        paint,
+      final portIndex = from.ports.indexOf(e.port);
+      final a = Offset(
+        from.x + 240 * (portIndex + 1) / (from.ports.length + 1),
+        from.y + (sizes[from.id]?.height ?? 160),
       );
+      final b = Offset(to.x + 120, to.y);
+      final bend = math.max(60.0, (a.dy - b.dy).abs() / 2);
+      final path = Path()..moveTo(a.dx, a.dy);
+      if (b.dy > a.dy && from.id != to.id) {
+        path.cubicTo(a.dx, a.dy + bend, b.dx, b.dy - bend, b.dx, b.dy);
+      } else {
+        final side = math.max(from.x + 280, to.x + 280) + portIndex * 30;
+        path
+          ..cubicTo(a.dx, a.dy + 60, side, a.dy + 60, side, a.dy)
+          ..lineTo(side, b.dy - 50)
+          ..cubicTo(side, b.dy - 80, b.dx, b.dy - 80, b.dx, b.dy);
+      }
+      canvas.drawPath(path, paint);
       canvas.drawPath(
         Path()
-          ..moveTo(b.dx - 8, b.dy - 5)
+          ..moveTo(b.dx - 5, b.dy - 8)
           ..lineTo(b.dx, b.dy)
-          ..lineTo(b.dx - 8, b.dy + 5),
+          ..lineTo(b.dx + 5, b.dy - 8),
         paint,
       );
       final label = TextPainter(
@@ -929,12 +1187,91 @@ class _Connections extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: 140);
-      label.paint(canvas, Offset((a.dx + b.dx) / 2, (a.dy + b.dy) / 2 - 18));
+      label.paint(canvas, Offset(a.dx + 8, a.dy + 8));
     }
   }
 
   @override
   bool shouldRepaint(covariant _Connections oldDelegate) => true;
+}
+
+class _NodeConfiguration extends StatefulWidget {
+  const _NodeConfiguration({
+    super.key,
+    required this.node,
+    required this.enabled,
+    required this.onChanged,
+  });
+  final FlowNode node;
+  final bool enabled;
+  final ValueChanged<Map<String, String>> onChanged;
+
+  @override
+  State<_NodeConfiguration> createState() => _NodeConfigurationState();
+}
+
+class _NodeConfigurationState extends State<_NodeConfiguration> {
+  late final fields = <String, String>{
+    'title': 'Nombre del bloque',
+    if ([
+      FlowKind.text,
+      FlowKind.question,
+      FlowKind.options,
+    ].contains(widget.node.kind))
+      'text': 'Mensaje',
+    if ([
+      FlowKind.question,
+      FlowKind.options,
+      FlowKind.condition,
+    ].contains(widget.node.kind))
+      'variable': 'Variable',
+    if (widget.node.kind == FlowKind.options)
+      'options': 'Opciones separadas por |',
+    if (widget.node.kind == FlowKind.condition) 'equals': 'Es igual a',
+  };
+  late final controllers = {
+    for (final key in fields.keys)
+      key: TextEditingController(text: widget.node.config[key] ?? ''),
+  };
+
+  @override
+  void dispose() {
+    for (final controller in controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final field in fields.entries)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: TextField(
+            controller: controllers[field.key],
+            enabled: widget.enabled,
+            maxLength: 1000,
+            minLines: field.key == 'text' ? 3 : 1,
+            maxLines: field.key == 'text' ? 5 : 1,
+            decoration: InputDecoration(
+              labelText: field.value,
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (_) => widget.onChanged({
+              for (final entry in controllers.entries)
+                entry.key: entry.value.text.trim(),
+            }),
+          ),
+        ),
+      const Text(
+        'Los cambios del bloque se aplican al borrador al escribir. '
+        'Usa {{variable}} para insertar respuestas. Solo datos ficticios.',
+        style: TextStyle(fontSize: 12),
+      ),
+    ],
+  );
 }
 
 class FlowSimulation extends StatefulWidget {

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:itone/features/automations/flow_builder.dart';
 import 'package:itone/features/automations/flow_graph.dart';
 import 'package:itone/features/automations/flow_repository.dart';
+import 'package:itone/features/automations/flow_canvas.dart';
 
 class _Repository extends FlowRepository {
   _Repository()
@@ -94,15 +95,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: FlowBuilder(
-                tenantId: 'company-one',
-                canEdit: edit,
-                repository: repository,
-              ),
-            ),
+          body: FlowBuilder(
+            tenantId: 'company-one',
+            canEdit: edit,
+            repository: repository,
           ),
         ),
       ),
@@ -111,11 +107,162 @@ void main() {
   }
 
   Future<void> tap(WidgetTester tester, String text) async {
-    final f = find.text(text);
+    final f = find.text(text).evaluate().isNotEmpty
+        ? find.text(text)
+        : find.byTooltip(text);
     await tester.ensureVisible(f);
     await tester.tap(f);
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'canvas fills the viewport and moves nodes beyond the old bounds at zoom',
+    (tester) async {
+      final repository = _Repository();
+      await open(tester, repository);
+      final canvasFinder = find.byType(FlowCanvas);
+      final canvasRect = tester.getRect(canvasFinder);
+      expect(canvasRect.height, greaterThan(850));
+      expect(canvasRect.bottom, lessThanOrEqualTo(1100));
+      expect(
+        find.ancestor(of: canvasFinder, matching: find.byType(Scrollable)),
+        findsNothing,
+      );
+      expect(find.text('Biblioteca de componentes'), findsOneWidget);
+      expect(find.text('Configuración'), findsOneWidget);
+      final canvas = tester.widget<FlowCanvas>(canvasFinder);
+      canvas.controller.value = Matrix4.identity()
+        ..translateByDouble(120, 60, 0, 1)
+        ..scaleByDouble(.2, .2, 1, 1);
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('drag-start')),
+        const Offset(650, 200),
+      );
+      await tester.pumpAndSettle();
+      await tap(tester, 'Guardar borrador');
+      final moved = repository.flows.single.graph.node('start');
+      expect(moved.x, greaterThan(2600));
+      expect(moved.y, greaterThan(1000));
+      await tap(tester, 'Ajustar flujo');
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'searchable library supports dropping a block and inline edits persist',
+    (tester) async {
+      final repository = _Repository();
+      await open(tester, repository);
+      final search = find.widgetWithText(TextField, 'Buscar componentes');
+      await tester.enterText(search, 'Enviar');
+      await tester.pumpAndSettle();
+      expect(find.text('+ Pregunta'), findsNothing);
+      final canvasRect = tester.getRect(find.byType(FlowCanvas));
+      final tile = find.text('+ Enviar texto');
+      await tester.dragFrom(
+        tester.getCenter(tile),
+        canvasRect.topLeft + const Offset(350, 50) - tester.getCenter(tile),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('node-node_1')), findsOneWidget);
+      final message = find.widgetWithText(TextField, 'Mensaje');
+      await tester.ensureVisible(message);
+      await tester.enterText(message, 'Edición directa');
+      await tester.pumpAndSettle();
+      await tap(tester, 'Guardar borrador');
+      expect(
+        repository.flows.single.graph.node('node_1').config['text'],
+        'Edición directa',
+      );
+      expect(repository.flows.single.graph.node('node_1').x, closeTo(350, 2));
+    },
+  );
+  testWidgets(
+    'panning has no old canvas boundary and negative positions survive reload',
+    (tester) async {
+      final repository = _Repository();
+      await open(tester, repository);
+      final canvas = tester.widget<FlowCanvas>(find.byType(FlowCanvas));
+      final rect = tester.getRect(find.byType(FlowCanvas));
+      final focal = Offset(rect.width / 2, rect.height / 2);
+      final before = canvas.controller.toScene(focal);
+      await tap(tester, 'Alejar lienzo');
+      final after = canvas.controller.toScene(focal);
+      expect(after.dx, closeTo(before.dx, .01));
+      expect(after.dy, closeTo(before.dy, .01));
+      for (var i = 0; i < 6; i++) {
+        await tester.dragFrom(
+          rect.bottomRight - const Offset(80, 120),
+          const Offset(600, 300),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(canvas.controller.value.entry(0, 3), greaterThan(2900));
+      await tap(tester, '+ Enviar texto');
+      await tap(tester, 'Guardar borrador');
+      expect(repository.flows.single.graph.node('node_1').x, lessThan(-2600));
+      expect(repository.flows.single.graph.node('node_1').y, lessThan(0));
+      await tap(tester, 'Recargar');
+      await tap(tester, 'Guardar borrador');
+      expect(repository.flows.single.graph.node('node_1').x, lessThan(-2600));
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'fullscreen control preserves edited draft while the shell is hidden',
+    (tester) async {
+      final repository = _Repository();
+      tester.view.physicalSize = const Size(1500, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      bool fullscreen = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, update) => Scaffold(
+              appBar: fullscreen ? null : AppBar(title: const Text('Cabecera')),
+              body: Row(
+                children: [
+                  Visibility(
+                    visible: !fullscreen,
+                    child: const SizedBox(width: 200, child: Text('Menú')),
+                  ),
+                  Expanded(
+                    child: FlowBuilder(
+                      tenantId: 'company-one',
+                      canEdit: true,
+                      repository: repository,
+                      fullscreen: fullscreen,
+                      onToggleFullscreen: () =>
+                          update(() => fullscreen = !fullscreen),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = tester.getSize(find.byType(FlowCanvas));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Nombre del flujo'),
+        'Sin perder cambios',
+      );
+      await tester.pumpAndSettle();
+      await tap(tester, 'Pantalla completa');
+      expect(find.text('Cabecera'), findsNothing);
+      expect(find.text('Menú'), findsNothing);
+      expect(find.text('Sin perder cambios'), findsOneWidget);
+      final after = tester.getSize(find.byType(FlowCanvas));
+      expect(after.width, greaterThan(before.width));
+      expect(after.height, greaterThan(before.height));
+      await tap(tester, 'Salir de pantalla completa');
+      expect(find.text('Cabecera'), findsOneWidget);
+      expect(find.text('Sin perder cambios'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'reload preserves the chosen flow and safely clears deleted drafts',
@@ -203,16 +350,14 @@ void main() {
       final repository = _Repository();
       await open(tester, repository);
       await tap(tester, '+ Enviar texto');
-      await tester.ensureVisible(find.text('Configurar bloque'));
-      await tap(tester, 'Configurar bloque');
       await tester.enterText(
         find.widgetWithText(TextField, 'Mensaje'),
         'Mensaje del flujo diseñado',
       );
-      await tap(tester, 'Aplicar bloque');
+      await tester.pumpAndSettle();
       final addedHandle = find.byKey(const ValueKey('drag-node_1'));
       await tester.ensureVisible(addedHandle);
-      await tester.drag(addedHandle, const Offset(650, 250));
+      await tester.drag(addedHandle, const Offset(350, 260));
       await tester.pumpAndSettle();
       final output = find.byType(DropdownButtonFormField<String>).last;
       await tester.ensureVisible(output);
@@ -258,7 +403,7 @@ void main() {
       await open(tester, repository, edit: false);
       expect(find.text('Guardar borrador'), findsNothing);
       expect(find.text('Publicar para simulación'), findsNothing);
-      expect(find.byType(ActionChip), findsNothing);
+      expect(find.text('Biblioteca de componentes'), findsNothing);
       await tap(tester, 'Probar automatización');
       expect(
         find.text('Prueba finalizada · Sin cambios reales.'),

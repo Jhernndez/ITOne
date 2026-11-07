@@ -53,6 +53,7 @@ Deno.test("flow drafts and immutable simulation versions enforce tenant roles an
         ('${tenant}','${agent}','operator'),('${other}','${agent}','tenant_admin');
     `);
     await db.exec(await Deno.readTextFile(new URL("../migrations/20261106183000_automation_flows.sql",import.meta.url)));
+    await db.exec(await Deno.readTextFile(new URL("../migrations/20261106193000_expand_automation_canvas.sql",import.meta.url)));
     await login(admin);
     await assert.rejects(sql("select save_automation_flow($1,null,'Bad schema',$2,null)",[
       tenant,JSON.stringify({...graph,schema:"1"}),
@@ -100,8 +101,13 @@ Deno.test("flow drafts and immutable simulation versions enforce tenant roles an
     const invalid = await save(missing);
     await assert.rejects(publish(invalid.id,1),/salidas sin conectar/);
     const cycle = structuredClone(graph); cycle.edges[1].to = "q";
+    cycle.nodes[0].x = -8000; cycle.nodes[1].y = 19000;
     const cycled = await save(cycle);
-    await assert.rejects(publish(cycled.id,1),/ciclos/);
+    await publish(cycled.id,1);
+    const snapshot = (await sql("select graph from automation_flow_versions where flow_id=$1",[cycled.id])).rows[0].graph;
+    assert.deepEqual(snapshot,cycle);
+    cycle.nodes[0].x = 1000000001;
+    await assert.rejects(save(cycle),/posicion/);
     const orphan = structuredClone(graph);
     orphan.nodes.push({id:"orphan",kind:"end",x:900,y:900,config:{}});
     const orphaned = await save(orphan);
