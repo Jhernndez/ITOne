@@ -75,7 +75,11 @@ El resultado muestra el ID real de Meta y aclara que aceptado no significa
 entregado. Confirmar la recepcion en WhatsApp antes de reintentar un fallo ambiguo.
 Estos mensajes de prueba no se incorporan a la bandeja de produccion.
 
+La cabecera de Integracion distingue Cloud API de coexistencia segun la modalidad
+guardada. Su estado corresponde a ITONE, no garantiza capacidad de envio en Meta.
 Para el video, mostrar ITONE enviando y el nuevo mensaje recibido en WhatsApp.
+Empezar la grabacion directamente en Prueba Meta, sin pasar por Integracion ni
+mostrar los identificadores y el numero de produccion.
 No mostrar tokens ni conversaciones ajenas. Para `whatsapp_business_management`,
 grabar por separado la creacion de una plantilla en WhatsApp Manager.
 La aceptacion de la evidencia depende de Meta.

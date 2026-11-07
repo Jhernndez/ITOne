@@ -9,6 +9,7 @@ import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
 import 'features/automations/flow_builder.dart';
 import 'features/whatsapp_review/whatsapp_review_panel.dart';
+import 'features/whatsapp_review/whatsapp_connection_header.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -5346,28 +5347,10 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Row(
-          children: [
-            Icon(
-              Icons.link_outlined,
-              size: 32,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'WhatsApp con coexistencia',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            Chip(label: Text(_integrationStatusLabel(_status))),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Conecta tu cuenta existente de WhatsApp Business para usar el mismo '
-          'número en el celular y en ITONE. Los permisos y las credenciales se '
-          'gestionan por empresa, exclusivamente en backend.',
+        WhatsAppConnectionHeader(
+          configured: hasIntegration,
+          onboardingMode: _onboardingMode,
+          statusLabel: _integrationStatusLabel(_status),
         ),
         const SizedBox(height: 24),
         _WhatsAppIntegrationSummary(
@@ -5380,7 +5363,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         const SizedBox(height: 12),
         if (hasIntegration && _onboardingMode != 'coexistence')
           const Text(
-            'Esta conexión anterior es Cloud API, no coexistencia. Si el número '
+            'No hay coexistencia confirmada para esta conexión. Si el número '
             'ya no funciona en el celular, regulariza su estado con Meta antes '
             'de conectarlo de nuevo. Este botón no elimina ni migra la cuenta.',
           ),
