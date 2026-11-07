@@ -8,6 +8,7 @@ import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
 import 'features/automations/flow_builder.dart';
+import 'features/whatsapp_review/whatsapp_review_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -5111,7 +5112,7 @@ class _WhatsAppSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Column(
         children: [
           Material(
@@ -5120,6 +5121,7 @@ class _WhatsAppSettings extends StatelessWidget {
               isScrollable: true,
               tabs: [
                 Tab(text: 'Integración'),
+                Tab(text: 'Prueba Meta'),
                 Tab(text: 'Bienvenida'),
                 Tab(text: 'Flujo de mensajes'),
                 Tab(text: 'SLA'),
@@ -5131,6 +5133,7 @@ class _WhatsAppSettings extends StatelessWidget {
             child: TabBarView(
               children: [
                 _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId),
+                WhatsAppReviewPanel(key: ValueKey('review-$tenantId'), tenantId: tenantId),
                 _WhatsAppWelcomeSettings(tenantId: tenantId),
                 _WhatsAppFlowSettings(tenantId: tenantId),
                 _WhatsAppSlaSettings(tenantId: tenantId),

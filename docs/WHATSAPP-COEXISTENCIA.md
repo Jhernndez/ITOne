@@ -23,6 +23,70 @@ una conversion automatica de un numero ya migrado, bloqueado o desconectado del
 celular. Antes de intentar coexistencia con ese numero, consulta su elegibilidad
 y el procedimiento de reincorporacion con Meta. No elimines la cuenta como prueba.
 
+## Evidencia de mensajeria sin modificar el numero de produccion
+
+En **Configuracion > WhatsApp > Prueba Meta**, el administrador puede enviar una
+plantilla real desde ITONE usando el numero de prueba de Meta. Este panel no
+registra ni desvincula numeros, no necesita coexistencia y no ejecuta flujos.
+Es una herramienta temporal de revision, no un conector general para clientes.
+
+Preparacion del servidor:
+
+1. Aplicar [20261106201500_whatsapp_review_attempts.sql](../supabase/migrations/20261106201500_whatsapp_review_attempts.sql).
+2. En **Supabase > Edge Functions > Secrets**, configurar:
+
+   | Secreto | Valor |
+   | --- | --- |
+   | `WHATSAPP_REVIEW_TENANT_ID` | UUID de la empresa autorizada, de `public.tenants.id` |
+   | `WHATSAPP_REVIEW_PHONE_NUMBER_ID` | Phone Number ID del numero **de prueba** en API Setup; no el WABA ID |
+   | `WHATSAPP_REVIEW_RECIPIENT` | Destinatario de prueba verificado en Meta, con codigo de pais, solo digitos |
+   | `WHATSAPP_REVIEW_ACCESS_TOKEN` | Token vigente generado para ese numero de prueba |
+
+   `META_GRAPH_VERSION`, si existe, se reutiliza. Sin ese secreto, esta funcion
+   usa `v25.0`. El token temporal puede caducar; renovarlo en Meta y actualizar
+   el secreto si Meta devuelve un error de autenticacion.
+
+3. Desplegar la nueva funcion con autenticacion JWT habilitada:
+
+   ```powershell
+   supabase functions deploy send-whatsapp-review
+   ```
+
+4. Publicar el frontend. GitHub / Cloudflare no aplica SQL ni despliega funciones.
+5. Iniciar sesion como administrador de la empresa autorizada y abrir la pestana.
+   Revisar ID y destinatario; marcar la confirmacion y pulsar
+   **Enviar plantilla real de prueba**.
+
+La plantilla es `jaspers_market_order_confirmation_v1`, idioma `en_US`, parametros
+`John Doe`, `123456`, `Nov 6, 2026`: los mismos que se comprobaron en API Setup.
+Solo funcionara si esa plantilla esta disponible en la cuenta de prueba.
+No se aceptan destinos, tokens ni plantillas arbitrarios enviados por el cliente.
+No guardar estos secretos en Flutter, GitHub, documentos o Cloudflare ni pegarlos
+en el chat. Al terminar la revision, retirar los cuatro secretos para deshabilitar
+el panel.
+
+El endpoint comprueba el rol actual y la empresa configurada. Reserva cada intento
+en PostgreSQL bajo bloqueo de la empresa: uno por minuto y veinte en 24 horas,
+incluidos los fallidos. Solo `service_role` puede reservar intentos; las tablas
+no son legibles por usuarios del frontend. La reserva cuenta intentos, no certifica
+entregas. Las llamadas a Meta no se reintentan automaticamente.
+
+El resultado muestra el ID real de Meta y aclara que aceptado no significa
+entregado. Confirmar la recepcion en WhatsApp antes de reintentar un fallo ambiguo.
+Estos mensajes de prueba no se incorporan a la bandeja de produccion.
+
+Para el video, mostrar ITONE enviando y el nuevo mensaje recibido en WhatsApp.
+No mostrar tokens ni conversaciones ajenas. Para `whatsapp_business_management`,
+grabar por separado la creacion de una plantilla en WhatsApp Manager.
+La aceptacion de la evidencia depende de Meta.
+
+Pruebas locales:
+
+```powershell
+flutter test --no-pub test\whatsapp_review_panel_test.dart
+npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\functions\_shared\whatsapp_review.test.ts supabase\tests\whatsapp_review_test.ts
+```
+
 ## 1. Preparar la app en Meta
 
 1. Abre [Meta Developers](https://developers.facebook.com/apps/) y selecciona tu
