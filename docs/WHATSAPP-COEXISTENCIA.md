@@ -23,74 +23,39 @@ una conversion automatica de un numero ya migrado, bloqueado o desconectado del
 celular. Antes de intentar coexistencia con ese numero, consulta su elegibilidad
 y el procedimiento de reincorporacion con Meta. No elimines la cuenta como prueba.
 
-## Evidencia de mensajeria sin modificar el numero de produccion
+## Conexion de produccion y retiro de Prueba Meta
 
-En **Configuracion > WhatsApp > Prueba Meta**, el administrador puede enviar una
-plantilla real desde ITONE usando el numero de prueba de Meta. Este panel no
-registra ni desvincula numeros, no necesita coexistencia y no ejecuta flujos.
-Es una herramienta temporal de revision, no un conector general para clientes.
+El onboarding de produccion se realiza desde **Configuracion > WhatsApp >
+Integracion > Conectar WhatsApp Business**, mediante Embedded Signup. No se
+requiere una segunda conexion manual. Coexistencia sigue usando Cloud API y
+el webhook para enviar, recibir e importar mensajes.
 
-Preparacion del servidor:
+**Validar conexion con Meta** es un diagnostico opcional del estado y las
+restricciones; no incorpora, registra ni elimina el numero. Las conexiones
+antiguas sin coexistencia se identifican como tales y sus datos quedan
+plegados para diagnostico. No certifican que el numero eliminado en Meta siga
+operativo ni se convierten automaticamente en conexiones de coexistencia.
 
-1. Aplicar [20261106201500_whatsapp_review_attempts.sql](../supabase/migrations/20261106201500_whatsapp_review_attempts.sql).
-2. En **Supabase > Edge Functions > Secrets**, configurar:
-
-   | Secreto | Valor |
-   | --- | --- |
-   | `WHATSAPP_REVIEW_TENANT_ID` | UUID de la empresa autorizada, de `public.tenants.id` |
-   | `WHATSAPP_REVIEW_PHONE_NUMBER_ID` | Phone Number ID del numero **de prueba** en API Setup; no el WABA ID |
-   | `WHATSAPP_REVIEW_RECIPIENT` | Destinatario de prueba verificado en Meta, con codigo de pais, solo digitos |
-   | `WHATSAPP_REVIEW_ACCESS_TOKEN` | Token vigente generado para ese numero de prueba |
-
-   `META_GRAPH_VERSION`, si existe, se reutiliza. Sin ese secreto, esta funcion
-   usa `v25.0`. El token temporal puede caducar; renovarlo en Meta y actualizar
-   el secreto si Meta devuelve un error de autenticacion.
-
-3. Desplegar la nueva funcion con autenticacion JWT habilitada:
-
-   ```powershell
-   supabase functions deploy send-whatsapp-review
-   ```
-
-4. Publicar el frontend. GitHub / Cloudflare no aplica SQL ni despliega funciones.
-5. Iniciar sesion como administrador de la empresa autorizada y abrir la pestana.
-   Revisar ID y destinatario; marcar la confirmacion y pulsar
-   **Enviar plantilla real de prueba**.
-
-La plantilla es `jaspers_market_order_confirmation_v1`, idioma `en_US`, parametros
-`John Doe`, `123456`, `Nov 6, 2026`: los mismos que se comprobaron en API Setup.
-Solo funcionara si esa plantilla esta disponible en la cuenta de prueba.
-No se aceptan destinos, tokens ni plantillas arbitrarios enviados por el cliente.
-No guardar estos secretos en Flutter, GitHub, documentos o Cloudflare ni pegarlos
-en el chat. Al terminar la revision, retirar los cuatro secretos para deshabilitar
-el panel.
-
-El endpoint comprueba el rol actual y la empresa configurada. Reserva cada intento
-en PostgreSQL bajo bloqueo de la empresa: uno por minuto y veinte en 24 horas,
-incluidos los fallidos. Solo `service_role` puede reservar intentos; las tablas
-no son legibles por usuarios del frontend. La reserva cuenta intentos, no certifica
-entregas. Las llamadas a Meta no se reintentan automaticamente.
-
-El resultado muestra el ID real de Meta y aclara que aceptado no significa
-entregado. Confirmar la recepcion en WhatsApp antes de reintentar un fallo ambiguo.
-Estos mensajes de prueba no se incorporan a la bandeja de produccion.
-
-La cabecera de Integracion distingue Cloud API de coexistencia segun la modalidad
-guardada. Su estado corresponde a ITONE, no garantiza capacidad de envio en Meta.
-Para el video, mostrar ITONE enviando y el nuevo mensaje recibido en WhatsApp.
-Empezar la grabacion directamente en Prueba Meta, sin pasar por Integracion ni
-mostrar los identificadores y el numero de produccion.
-No mostrar tokens ni conversaciones ajenas. Para `whatsapp_business_management`,
-grabar por separado la creacion de una plantilla desde Plantillas de ITONE
-o WhatsApp Manager.
-La aceptacion de la evidencia depende de Meta.
-
-Pruebas locales:
+El panel temporal **Prueba Meta** y su codigo de envio se retiraron. Para retirar
+tambien el endpoint y los secretos de un servidor previamente configurado:
 
 ```powershell
-flutter test --no-pub test\whatsapp_review_panel_test.dart
-npx --yes --package=deno deno test --no-lock --allow-read --allow-env supabase\functions\_shared\whatsapp_review.test.ts supabase\tests\whatsapp_review_test.ts
+supabase functions delete send-whatsapp-review
+supabase secrets unset WHATSAPP_REVIEW_TENANT_ID WHATSAPP_REVIEW_PHONE_NUMBER_ID WHATSAPP_REVIEW_RECIPIENT WHATSAPP_REVIEW_ACCESS_TOKEN
 ```
+
+No eliminar secretos `META_*`, el webhook ni las funciones de produccion. La
+migracion historica de intentos de prueba se conserva para mantener la secuencia
+de migraciones. La limpieza de una cuenta de prueba requiere identificar su
+tenant, ID de cuenta, WABA y Phone Number ID exactos, revisar dependencias y
+borrar solo esos datos en una transaccion. No borrar contactos compartidos,
+cuentas de otras empresas ni conversaciones de produccion. Retirar un registro
+de ITONE no elimina ni desvincula numeros en Meta o en el celular.
+
+Para revisiones de permisos, conservar las evidencias ya grabadas. Si Meta pide
+nueva evidencia antes de aprobar coexistencia, su API Setup permite demostrar
+mensajeria de prueba sin reactivar este panel. La creacion de plantillas se
+demuestra desde Plantillas o WhatsApp Manager. Meta decide la aceptacion.
 
 ## Plantillas de produccion por empresa
 

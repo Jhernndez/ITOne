@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:itone/features/whatsapp_review/whatsapp_connection_header.dart';
+import 'package:itone/features/whatsapp/whatsapp_connection_header.dart';
 
 void main() {
   for (final (mode, expected) in [
-    ('cloud_api', 'WhatsApp · Cloud API'),
+    ('cloud_api', 'WhatsApp · Conexión anterior Cloud API · sin coexistencia'),
     ('coexistence', 'WhatsApp · Coexistencia'),
     ('unknown', 'WhatsApp · Modalidad por verificar'),
   ]) {
@@ -48,6 +48,6 @@ void main() {
       ),
     );
     expect(find.text('Conectar WhatsApp Business'), findsOneWidget);
-    expect(find.text('WhatsApp · Cloud API'), findsNothing);
+    expect(find.textContaining('sin coexistencia'), findsNothing);
   });
 }

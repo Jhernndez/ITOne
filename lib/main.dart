@@ -8,8 +8,7 @@ import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
 import 'features/automations/flow_builder.dart';
-import 'features/whatsapp_review/whatsapp_review_panel.dart';
-import 'features/whatsapp_review/whatsapp_connection_header.dart';
+import 'features/whatsapp/whatsapp_connection_header.dart';
 import 'features/whatsapp_templates/whatsapp_templates_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -5130,7 +5129,7 @@ class _WhatsAppSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 7,
+      length: 6,
       child: Column(
         children: [
           Material(
@@ -5139,7 +5138,6 @@ class _WhatsAppSettings extends StatelessWidget {
               isScrollable: true,
               tabs: [
                 Tab(text: 'Integración'),
-                Tab(text: 'Prueba Meta'),
                 Tab(text: 'Plantillas'),
                 Tab(text: 'Bienvenida'),
                 Tab(text: 'Flujo de mensajes'),
@@ -5152,7 +5150,6 @@ class _WhatsAppSettings extends StatelessWidget {
             child: TabBarView(
               children: [
                 _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId),
-                WhatsAppReviewPanel(key: ValueKey('review-$tenantId'), tenantId: tenantId),
                 WhatsAppTemplatesPanel(key: ValueKey('templates-$tenantId'), tenantId: tenantId),
                 _WhatsAppWelcomeSettings(tenantId: tenantId),
                 _WhatsAppFlowSettings(tenantId: tenantId),
@@ -5372,7 +5369,21 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           statusLabel: _integrationStatusLabel(_status),
         ),
         const SizedBox(height: 24),
-        _WhatsAppIntegrationSummary(
+        if (hasIntegration && _onboardingMode != 'coexistence')
+          ExpansionTile(
+            title: const Text('Conexión anterior: datos de diagnóstico'),
+            children: [
+              _WhatsAppIntegrationSummary(
+                configured: true,
+                businessAccountId: _businessIdController.text,
+                phoneNumberId: _phoneIdController.text,
+                phoneNumber: _phoneController.text,
+                channelName: _nameController.text,
+              ),
+            ],
+          )
+        else
+          _WhatsAppIntegrationSummary(
             configured: hasIntegration,
             businessAccountId: _businessIdController.text,
             phoneNumberId: _phoneIdController.text,
@@ -5382,9 +5393,10 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
         const SizedBox(height: 12),
         if (hasIntegration && _onboardingMode != 'coexistence')
           const Text(
-            'No hay coexistencia confirmada para esta conexión. Si el número '
-            'ya no funciona en el celular, regulariza su estado con Meta antes '
-            'de conectarlo de nuevo. Este botón no elimina ni migra la cuenta.',
+            'Esta conexión anterior no confirma coexistencia. Para usar el número '
+            'del celular y la plataforma, pulsa Conectar WhatsApp Business y '
+            'autoriza la cuenta existente. Meta exige los permisos avanzados '
+            'aprobados. No elimines ni registres de nuevo el número como prueba.',
           ),
         const SizedBox(height: 12),
         const Text(

@@ -17,7 +17,7 @@ class WhatsAppConnectionHeader extends StatelessWidget {
     final mode = onboardingMode == 'coexistence'
         ? 'Coexistencia'
         : onboardingMode == 'cloud_api'
-        ? 'Cloud API'
+        ? 'Conexión anterior Cloud API · sin coexistencia'
         : 'Modalidad por verificar';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -46,6 +46,7 @@ class WhatsAppConnectionHeader extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         const Text(
+          'Coexistencia utiliza Cloud API para enviar y recibir mensajes. '
           'La opción de conexión con coexistencia permite solicitar el uso del '
           'mismo número en WhatsApp Business móvil y en ITONE, sujeto a elegibilidad '
           'y autorización de Meta. Los permisos y las credenciales se gestionan '
