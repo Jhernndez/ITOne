@@ -1,7 +1,7 @@
 import {
   graph, graphVersion, json, requireTenantAdmin, WhatsAppError, corsHeaders,
 } from "../_shared/whatsapp.ts";
-import { platformMetaConfiguration } from "../_shared/platform_meta.ts";
+import { checkMetaApp, platformMetaConfiguration } from "../_shared/platform_meta.ts";
 
 interface Phone {
   id: string;
@@ -20,12 +20,17 @@ Deno.serve(async (request) => {
       throw new WhatsAppError("tenant_id is required");
     }
     const admin = await requireTenantAdmin(request, body.tenant_id);
-    const { appId, appSecret, configId } = await platformMetaConfiguration(admin);
+    const config = await platformMetaConfiguration(admin);
+    const { appId, appSecret, configId } = config;
     if (!appId || !appSecret || !configId) {
       throw new WhatsAppError(
         "Falta la configuración global de Meta. Contacta al propietario de ITONE Platform.",
         503,
       );
+    }
+    const readiness = await checkMetaApp(config);
+    if (!readiness.coexistence_webhooks_ready) {
+      throw new WhatsAppError("ITONE aún no tiene activos todos los eventos de coexistencia. El propietario debe activarlos en Platform → WhatsApp y Meta antes de conectar el número.", 503);
     }
     if (body.action === "configuration") {
       return json({ app_id: appId, config_id: configId, graph_version: graphVersion() });

@@ -12,6 +12,7 @@ import 'features/automations/bot_controls.dart';
 import 'features/external_api/external_api_panel.dart';
 import 'features/whatsapp/whatsapp_connection_header.dart';
 import 'features/whatsapp/platform_whatsapp_settings.dart';
+import 'features/whatsapp/message_image.dart';
 import 'features/whatsapp_templates/whatsapp_templates_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -5321,7 +5322,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
       final rows = await _client
           .from('whatsapp_messages')
           .select(
-            'id, direction, message_type, body, created_at, provider_timestamp, delivery_status, delivery_error, source',
+            'id, direction, message_type, body, created_at, provider_timestamp, delivery_status, delivery_error, source, media_id',
           )
           .eq('tenant_id', widget.tenantId)
           .eq('conversation_id', conversationId)
@@ -5548,6 +5549,15 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                                     sent: sent,
                                     theme: theme,
                                   ),
+                                  if (message['media_id'] != null &&
+                                      (message['message_type'] == 'image' || message['message_type'] == 'sticker'))
+                                    WhatsAppMessageImage(
+                                      key: ValueKey('image-${widget.tenantId}-${message['id']}'),
+                                      tenantId: widget.tenantId,
+                                      messageId: message['id'] as String,
+                                    ),
+                                  if (message['media_id'] == null && message['message_type'] == 'image')
+                                    const Text('Archivo no disponible en ITONE; ábrelo desde WhatsApp Business.'),
                                   if (message['source'] == 'business_app' || message['source'] == 'history')
                                     Text(
                                       message['source'] == 'history' ? 'Historial importado' : 'Desde el celular',

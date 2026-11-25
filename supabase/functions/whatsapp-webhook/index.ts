@@ -6,7 +6,7 @@ import {
 } from "../_shared/whatsapp_webhook.ts";
 
 declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
-Deno.serve(async (request) => {
+export async function whatsappWebhook(request: Request) {
   if (request.method === "GET") {
     const url = new URL(request.url);
     const supabaseUrl = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -87,6 +87,14 @@ Deno.serve(async (request) => {
           });
           if (error) throw error;
         }
+        for (const message of messages.filter(message => message.media_id)) {
+          if (!/^\d{1,64}$/.test(message.media_id!)) throw new Error("Invalid WhatsApp media identity");
+          const { error } = await client.from("whatsapp_messages").update({
+            media_id: message.media_id, media_mime_type: message.media_mime_type,
+          }).eq("whatsapp_account_id", account.id).eq("tenant_id", account.tenant_id)
+            .eq("provider_message_id", message.provider_message_id);
+          if (error) throw error;
+        }
         const stateSync = objects(value.state_sync);
         if (stateSync.length) {
           const { error } = await client.rpc("sync_whatsapp_contacts", {
@@ -120,4 +128,6 @@ Deno.serve(async (request) => {
     console.error("WhatsApp webhook processing failed", error);
     return json({ error: "WhatsApp webhook processing failed; retry required" }, 500);
   }
-});
+}
+
+if (import.meta.main) Deno.serve(whatsappWebhook);

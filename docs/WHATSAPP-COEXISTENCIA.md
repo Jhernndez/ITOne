@@ -32,6 +32,21 @@ el webhook para enviar, recibir e importar mensajes.
 
 ### Separacion entre plataforma y empresas
 
+El webhook debe suscribirse a `messages`, `smb_message_echoes`,
+`smb_app_state_sync` e `history`. Platform muestra los eventos faltantes y
+permite al propietario activarlos conservando los campos existentes. El
+onboarding no comienza mientras estos eventos no esten activos. Suscribirse
+despues no garantiza recuperar mensajes anteriores: no repitas solicitudes
+de historial ya realizadas ni desregistres numeros para probar.
+
+Las imagenes y stickers nuevos guardan el ID de media de Meta. **Ver imagen**
+descarga el archivo bajo demanda mediante `whatsapp-message-image`, con
+autenticacion, permisos de empresa/cuenta, token exclusivo del servidor y
+limite de 5 MB (JPEG/PNG/WebP). Las URLs y tokens no llegan al navegador. Los
+archivos vencidos o ausentes en historial muestran un error explicito.
+Aplica `20261125234000_whatsapp_image_media.sql` antes de desplegar webhook y
+visor; no es una importacion retroactiva de adjuntos perdidos.
+
 Las respuestas manuales aceptan el telefono del contacto o, cuando Meta no lo
 incluye, su `whatsapp_user_id`. Este ultimo solo se utiliza si pertenece a la
 misma cuenta de WhatsApp de la conversacion; ambos casos requieren que el

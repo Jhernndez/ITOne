@@ -69,7 +69,7 @@ export async function validateWhatsAppIntegration(request: Request) {
           id?: string;
           can_send_message?: string;
           additional_info?: string[];
-          errors?: unknown[];
+          errors?: { error_code?: number; error_description?: string; possible_solution?: string }[];
         },
       ) => ({
         entity_type: entity.entity_type,
@@ -77,9 +77,8 @@ export async function validateWhatsAppIntegration(request: Request) {
         can_send_message: entity.can_send_message,
         // Real reason messaging is LIMITED/BLOCKED for this entity.
         additional_info: entity.additional_info ?? null,
-        // Only surface `errors` when the messaging status itself is BLOCKED;
-        // otherwise these errors belong to an unrelated capability (e.g. calling/SIP).
-        messaging_errors: entity.can_send_message === "BLOCKED" ? entity.errors ?? null : null,
+        messaging_errors: (entity.errors ?? []).filter(error =>
+          error.error_code !== 138024 && error.error_code !== 138025),
       }));
 
     // The phone number's own `status` field can also signal a restriction

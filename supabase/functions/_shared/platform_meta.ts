@@ -29,7 +29,17 @@ export async function platformMetaConfiguration(
     source: data ? "platform" : "environment",
   };
 }
-async function appRequest(path: string, config: PlatformMetaConfiguration) {
+export const coexistenceFields = [
+  "messages",
+  "smb_message_echoes",
+  "smb_app_state_sync",
+  "history",
+];
+async function appRequest(
+  path: string,
+  config: PlatformMetaConfiguration,
+  body?: URLSearchParams,
+) {
   if (!config.appId || !config.appSecret) {
     throw new WhatsAppError("Faltan App ID o App Secret de Meta", 409);
   }
@@ -38,6 +48,8 @@ async function appRequest(path: string, config: PlatformMetaConfiguration) {
     response = await fetch(
       `https://graph.facebook.com/${graphVersion()}/${path}`,
       {
+        method: body ? "POST" : "GET",
+        body,
         headers: {
           Authorization: `Bearer ${config.appId}|${config.appSecret}`,
         },
@@ -97,6 +109,11 @@ export async function checkMetaApp(config: PlatformMetaConfiguration) {
     .find(
       (s: { object?: string }) => s.object === "whatsapp_business_account",
     );
+  const fields: string[] = Array.isArray(webhook?.fields)
+    ? webhook.fields.map((f: { name?: string }) => f.name).filter((
+      name: unknown,
+    ) => typeof name === "string")
+    : [];
   return {
     app_id: app.id,
     app_name: app.name ?? null,
@@ -108,8 +125,51 @@ export async function checkMetaApp(config: PlatformMetaConfiguration) {
         name: unknown,
       ) => typeof name === "string")
       : [],
+    coexistence_missing_fields: coexistenceFields.filter((field) =>
+      !fields.includes(field)
+    ),
+    coexistence_webhooks_ready: webhook?.callback_url === expected &&
+      webhook?.active === true &&
+      coexistenceFields.every((field) => fields.includes(field)),
     config_id: config.configId ?? null,
     message:
       "Credenciales de la aplicación verificadas. El Config ID debe corresponder a Embedded Signup con coexistencia; esta prueba no autoriza ni registra números.",
   };
+}
+
+export async function configureCoexistenceWebhooks(
+  config: PlatformMetaConfiguration,
+) {
+  const before = await checkMetaApp(config);
+  if (!before.webhook_matches || !config.verifyToken) {
+    throw new WhatsAppError(
+      "Primero configura el webhook de ITONE y su token de verificación.",
+      409,
+    );
+  }
+  if (before.coexistence_webhooks_ready) return before;
+  const fields = [...new Set([...before.webhook_fields, ...coexistenceFields])];
+  const result = await appRequest(
+    `${encodeURIComponent(config.appId!)}/subscriptions`,
+    config,
+    new URLSearchParams({
+      object: "whatsapp_business_account",
+      callback_url: `${
+        Deno.env.get("SUPABASE_URL")
+      }/functions/v1/whatsapp-webhook`,
+      verify_token: config.verifyToken,
+      fields: fields.join(","),
+    }),
+  );
+  if (result.success !== true) {
+    throw new WhatsAppError("Meta no confirmó las suscripciones.", 502);
+  }
+  const after = await checkMetaApp(config);
+  if (!after.coexistence_webhooks_ready) {
+    throw new WhatsAppError(
+      "Meta aún no confirma todos los eventos de coexistencia. Revisa el panel de webhooks.",
+      409,
+    );
+  }
+  return after;
 }

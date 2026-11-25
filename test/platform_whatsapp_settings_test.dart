@@ -80,7 +80,26 @@ class _Repository extends PlatformWhatsAppRepository {
         'webhook_matches': true,
         'webhook_active': true,
         'webhook_fields': ['messages'],
+        'coexistence_webhooks_ready': false,
+        'coexistence_missing_fields': [
+          'smb_message_echoes',
+          'smb_app_state_sync',
+          'history',
+        ],
         'message': 'Esta prueba no registra números.',
+      },
+      'configure_coexistence_webhooks' => {
+        'app_credentials_valid': true,
+        'webhook_matches': true,
+        'webhook_active': true,
+        'webhook_fields': [
+          'messages',
+          'smb_message_echoes',
+          'smb_app_state_sync',
+          'history',
+        ],
+        'coexistence_webhooks_ready': true,
+        'coexistence_missing_fields': <String>[],
       },
       _ => throw StateError('Unexpected action'),
     };
@@ -224,6 +243,23 @@ void main() {
       expect(repo.calls.last, ('check_app', null));
       expect(find.text('Credenciales de aplicación: Válidas'), findsOneWidget);
       expect(find.text('Webhook de ITONE en Meta: Coincide'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'owner confirms coexistence subscription changes and sees readiness',
+    (t) async {
+      await open(t, _Repository());
+      await t.tap(find.text('Comprobar aplicación de Meta'));
+      await t.pumpAndSettle();
+      await t.ensureVisible(find.text('Activar eventos de coexistencia'));
+      await t.tap(find.text('Activar eventos de coexistencia'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Activar'));
+      await t.pumpAndSettle();
+      expect(find.text('Eventos de coexistencia: Completos'), findsOneWidget);
+      expect(find.text('Activar eventos de coexistencia'), findsNothing);
+      expect(t.takeException(), isNull);
     },
   );
 

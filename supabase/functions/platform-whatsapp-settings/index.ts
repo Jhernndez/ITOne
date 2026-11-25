@@ -1,6 +1,7 @@
 import { requirePlatformOwner } from "../_shared/platform_owner.ts";
 import {
   checkMetaApp,
+  configureCoexistenceWebhooks,
   platformMetaConfiguration,
   verifyMetaApp,
 } from "../_shared/platform_meta.ts";
@@ -71,6 +72,13 @@ export async function platformWhatsAppSettings(request: Request) {
     }
     if (body.action === "check_app") {
       return json(await checkMetaApp(await platformMetaConfiguration(admin)));
+    }
+    if (body.action === "configure_coexistence_webhooks") {
+      return json(
+        await configureCoexistenceWebhooks(
+          await platformMetaConfiguration(admin),
+        ),
+      );
     }
     if (body.action === "save_configuration") {
       if (

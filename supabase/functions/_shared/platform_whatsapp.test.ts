@@ -4,6 +4,29 @@ import { validateWhatsAppIntegration } from "../validate-whatsapp-integration/in
 
 const tenant = "10000000-0000-0000-0000-000000000001";
 
+Deno.test("only owner can add missing coexistence webhooks, preserving existing fields", async () => {
+  await fixture(async (state) => {
+    state.role = "tenant_admin";
+    assert.equal(
+      (await platformWhatsAppSettings(
+        request("configure_coexistence_webhooks"),
+      )).status,
+      403,
+    );
+    state.role = "platform_owner";
+    const result = await platformWhatsAppSettings(
+      request("configure_coexistence_webhooks"),
+    );
+    assert.equal(result.status, 200);
+    const data = await result.json();
+    assert.equal(data.coexistence_webhooks_ready, true);
+    assert.ok(state.webhookFields.includes("security"));
+    assert.ok(state.webhookFields.includes("smb_message_echoes"));
+    assert.ok(state.webhookFields.includes("history"));
+    assert.ok(!JSON.stringify(data).includes("never-expose"));
+  });
+});
+
 async function fixture(
   run: (state: {
     role: string | null;
@@ -13,6 +36,7 @@ async function fixture(
     saves: Record<string, unknown>[];
     companyFailure: boolean;
     configuration: Record<string, unknown> | null;
+    webhookFields: string[];
   }) => Promise<void>,
 ) {
   const keys: Record<string, string> = {
@@ -37,6 +61,7 @@ async function fixture(
     saves: [] as Record<string, unknown>[],
     companyFailure: false,
     configuration: null as Record<string, unknown> | null,
+    webhookFields: ["messages", "security"],
   };
   for (const [k, v] of Object.entries(keys)) Deno.env.set(k, v);
   globalThis.fetch = (input, init) => {
@@ -87,6 +112,16 @@ async function fixture(
         }];
     } else if (url.startsWith("https://graph.facebook.com/")) {
       if (!state.validation) {
+        if (init?.method === "POST") {
+          const params = init.body as URLSearchParams;
+          assert.equal(params.get("object"), "whatsapp_business_account");
+          assert.equal(
+            params.get("callback_url"),
+            "https://example.test/functions/v1/whatsapp-webhook",
+          );
+          state.webhookFields = params.get("fields")!.split(",");
+          return Promise.resolve(Response.json({ success: true }));
+        }
         data = url.includes("/subscriptions")
           ? {
             data: [{
@@ -94,7 +129,7 @@ async function fixture(
               active: true,
               callback_url:
                 "https://example.test/functions/v1/whatsapp-webhook",
-              fields: [{ name: "messages" }],
+              fields: state.webhookFields.map((name) => ({ name })),
             }],
           }
           : { id: new URL(url).pathname.split("/")[2], name: "ITONE" };
@@ -112,6 +147,7 @@ async function fixture(
           entities: [{
             entity_type: "PHONE_NUMBER",
             can_send_message: "BLOCKED",
+            errors: [{ error_code: 138024 }, { error_code: 141010, error_description: "Business verification pending" }],
           }],
         },
       };
@@ -209,6 +245,7 @@ Deno.test("owner can validate a tenant without a tenant grant and see Meta restr
     const data = await response.json();
     assert.equal(data.status, "restricted");
     assert.equal(data.blocked_entities[0].can_send_message, "BLOCKED");
+    assert.deepEqual(data.blocked_entities[0].messaging_errors.map((error: { error_code: number }) => error.error_code), [141010]);
     assert.ok(!s.requests.some((url) => url.includes("current_tenant_role")));
     assert.ok(
       s.requests.some((url) => url.startsWith("https://graph.facebook.com/")),
@@ -243,7 +280,7 @@ Deno.test("owner app check returns safe credentials and webhook status, distinct
     assert.equal(data.app_credentials_valid, true);
     assert.equal(data.webhook_matches, true);
     assert.equal(data.webhook_active, true);
-    assert.deepEqual(data.webhook_fields, ["messages"]);
+    assert.deepEqual(data.webhook_fields, ["messages", "security"]);
     assert.ok(!JSON.stringify(data).includes("never-expose"));
   });
 });

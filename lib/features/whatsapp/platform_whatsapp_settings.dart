@@ -128,6 +128,34 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
     if (mounted) setState(() => appValidation = result);
   });
 
+  Future<void> configureWebhooks() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Activar eventos de coexistencia'),
+        content: const Text(
+          'Se agregarán las suscripciones de mensajes del celular, contactos e historial '
+          'al webhook global de Meta, conservando los eventos existentes. No registra números ni reintenta envíos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Activar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await run(() async {
+      final result = await repository.call('configure_coexistence_webhooks');
+      if (mounted) setState(() => appValidation = result);
+    });
+  }
+
   Future<void> editConfiguration() async {
     final appId = _appId..text = configuration?['app_id'] as String? ?? '';
     final configId = _configId
@@ -353,6 +381,20 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
               appValidation!['webhook_active'] == true ? 'Sí' : 'No confirmado',
             ),
             detail('Campos suscritos', appValidation!['webhook_fields']),
+            if (appValidation!['coexistence_missing_fields'] is List) ...[
+              detail(
+                'Eventos de coexistencia',
+                appValidation!['coexistence_webhooks_ready'] == true
+                    ? 'Completos'
+                    : 'Faltan: ${appValidation!['coexistence_missing_fields']}',
+              ),
+              if (appValidation!['coexistence_webhooks_ready'] != true)
+                OutlinedButton.icon(
+                  onPressed: busy ? null : configureWebhooks,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Activar eventos de coexistencia'),
+                ),
+            ],
             Text(appValidation!['message'] as String? ?? ''),
           ],
           const SizedBox(height: 24),

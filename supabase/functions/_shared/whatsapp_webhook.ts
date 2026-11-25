@@ -78,6 +78,8 @@ export interface NormalizedMessage {
   delivery_status: string;
   source: Source;
   original_message_id: string | null;
+  media_id?: string | null;
+  media_mime_type?: string | null;
 }
 
 export function normalizeMessages(field: string, value: ObjectValue): NormalizedMessage[] {
@@ -111,6 +113,10 @@ export function normalizeMessages(field: string, value: ObjectValue): Normalized
         direction === "outbound" ? "sent" : "accepted",
       source,
       original_message_id: text(object(message.edit ?? message.revoke).original_message_id),
+      ...(message.type === "image" || message.type === "sticker" ? {
+        media_id: text(object(message[String(message.type)]).id),
+        media_mime_type: text(object(message[String(message.type)]).mime_type),
+      } : {}),
     });
   };
   for (const message of objects(value.messages)) {
