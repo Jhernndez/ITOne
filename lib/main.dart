@@ -5543,12 +5543,16 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  _MessageBubble(
-                                    text: message['body'] as String? ??
-                                        '[Mensaje no compatible]',
-                                    sent: sent,
-                                    theme: theme,
-                                  ),
+                                  if (message['message_type'] != 'image' ||
+                                      (message['body'] is String &&
+                                          (message['body'] as String).trim().isNotEmpty &&
+                                          message['body'] != '[Imagen recibida]'))
+                                    _MessageBubble(
+                                      text: message['body'] as String? ??
+                                          '[Mensaje no compatible]',
+                                      sent: sent,
+                                      theme: theme,
+                                    ),
                                   if (message['media_id'] != null &&
                                       (message['message_type'] == 'image' || message['message_type'] == 'sticker'))
                                     WhatsAppMessageImage(

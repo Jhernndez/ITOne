@@ -45,6 +45,7 @@ autenticacion, permisos de empresa/cuenta, token exclusivo del servidor y
 limite de 5 MB (JPEG/PNG/WebP). Las URLs y tokens no llegan al navegador. Los
 archivos vencidos o ausentes en historial muestran un error explicito.
 Tocar la imagen abre la vista ampliada; si la descarga falla, se ofrece reintento.
+El chat omite la etiqueta generica de imagen recibida, conservando los captions reales.
 Aplica `20261125234000_whatsapp_image_media.sql` antes de desplegar webhook y
 visor; no es una importacion retroactiva de adjuntos perdidos.
 
