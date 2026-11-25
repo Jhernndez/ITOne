@@ -17,6 +17,7 @@ class _Repository extends PlatformWhatsAppRepository {
   bool denied = false;
   bool companiesFailed = false;
   Map<String, String>? saved;
+  List<Map<String, dynamic>> accounts = [];
   @override
   Future<Map<String, dynamic>> saveConfiguration(
     Map<String, String> values,
@@ -65,7 +66,7 @@ class _Repository extends PlatformWhatsAppRepository {
                 'phone_number_id': 'old-phone',
               }
             : null,
-        'accounts': <Map<String, dynamic>>[],
+        'accounts': tenantId == 'first' ? accounts : <Map<String, dynamic>>[],
       },
       'validate' => {
         'status': 'restricted',
@@ -122,6 +123,11 @@ void main() {
       await open(t, repo);
       expect(find.text('App ID: 2169281667133692'), findsOneWidget);
       expect(find.text('App Secret: Configurado'), findsOneWidget);
+      await t.ensureVisible(
+        find.text('Identificadores técnicos de la integración'),
+      );
+      await t.tap(find.text('Identificadores técnicos de la integración'));
+      await t.pumpAndSettle();
       expect(find.text('WABA de la integración: old-waba'), findsOneWidget);
       await t.ensureVisible(find.text('Validar conexión con Meta'));
       await t.tap(find.text('Validar conexión con Meta'));
@@ -140,6 +146,11 @@ void main() {
       expect(repo.calls.last, ('diagnostics', 'second'));
       expect(find.textContaining('old-waba'), findsNothing);
       expect(find.textContaining('Resultado:'), findsNothing);
+      expect(find.text('WhatsApp sin conectar'), findsOneWidget);
+      expect(
+        find.text('Identificadores técnicos de la integración'),
+        findsNothing,
+      );
       expect(
         t
             .widget<OutlinedButton>(
@@ -151,6 +162,43 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
+  for (final mode in ['cloud_api', 'coexistence', 'unknown']) {
+    testWidgets(
+      'company account has honest connection mode and collapsible technical IDs: $mode',
+      (t) async {
+        final repo = _Repository()
+          ..accounts = [
+            {
+              'id': 'account-one',
+              'name': 'Canal de empresa',
+              'display_phone_number': '+00 1234',
+              'onboarding_mode': mode,
+              'status': 'active',
+              'business_account_id': 'account-waba',
+              'phone_number_id': 'account-phone',
+            },
+          ];
+        await open(t, repo);
+        expect(
+          find.text(switch (mode) {
+            'cloud_api' =>
+              'Conexión: Cloud API antigua · sin coexistencia acreditada',
+            'coexistence' => 'Conexión: Coexistencia',
+            _ => 'Conexión: Modalidad no confirmada',
+          }),
+          findsOneWidget,
+        );
+        expect(find.text('WABA: account-waba'), findsNothing);
+        await t.ensureVisible(
+          find.text('Identificadores técnicos de la cuenta'),
+        );
+        await t.tap(find.text('Identificadores técnicos de la cuenta'));
+        await t.pumpAndSettle();
+        expect(find.text('WABA: account-waba'), findsOneWidget);
+        expect(t.takeException(), isNull);
+      },
+    );
+  }
   testWidgets('denied access displays explicit error without configuration', (
     t,
   ) async {

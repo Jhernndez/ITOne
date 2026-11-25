@@ -53,6 +53,10 @@ el webhook para enviar, recibir e importar mensajes.
   consulta restricciones y actualiza el estado de esa integracion. No incorpora,
   registra, elimina ni migra el numero. Se conserva el diagnostico de conexiones
   antiguas sin declararlas conexiones de coexistencia.
+  El diagnostico muestra **WhatsApp sin conectar** cuando no hay cuenta ni
+  integracion, e indica al administrador como autorizar desde su espacio.
+  La modalidad se muestra con nombres legibles; los IDs de Meta quedan en
+  secciones desplegables. Un registro antiguo nunca se etiqueta como coexistencia.
 - **Empresa > Configuracion > WhatsApp > Integracion**: el cliente ve su numero,
   estado sencillo, importacion y boton de autorizacion. No necesita ingresar
   tokens ni IDs. La vista de plantillas identifica las cuentas por nombre y

@@ -360,6 +360,12 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
             'Diagnóstico por empresa',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
+          const Text(
+            'Cada empresa autoriza su propio WhatsApp Business por coexistencia. '
+            'La conexión global de ITONE con Meta se administra arriba; '
+            'aquí no se ingresan tokens ni se registran números.',
+          ),
+          const SizedBox(height: 12),
           if (tenants.isEmpty && !busy && error == null)
             const Text('No hay empresas disponibles.'),
           if (tenants.isNotEmpty)
@@ -391,18 +397,43 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
                     },
             ),
           if (diagnostics != null) ...[
-            detail('Estado guardado', integration?['status'] ?? 'Sin conexión'),
-            detail(
-              'WABA de la integración',
-              integration?['business_account_id'],
-            ),
-            detail(
-              'Phone Number ID de la integración',
-              integration?['phone_number_id'],
-            ),
-            const Text(
-              'Cuentas guardadas (no certifican acceso actual en Meta):',
-            ),
+            if (integration == null && accounts.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'WhatsApp sin conectar',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Esta empresa todavía no tiene una conexión de WhatsApp guardada en ITONE. '
+                        'Su administrador debe entrar al espacio de la empresa → '
+                        'Configuración → WhatsApp → Integración → Conectar WhatsApp Business.',
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'La autorización debe completarse por coexistencia para utilizar '
+                        'el número en el celular y en ITONE. Este estado no confirma '
+                        'la elegibilidad ni elimina registros del número en Meta.',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (integration != null)
+              detail(
+                'Estado de la integración guardado',
+                integration['status'],
+              ),
+            if (integration != null && accounts.isEmpty)
+              const Text(
+                'Hay un registro de integración, pero no una cuenta de WhatsApp asociada. '
+                'No se puede confirmar una conexión operativa; revisa la autorización de la empresa.',
+              ),
             for (final account in accounts.whereType<Map>())
               Card(
                 child: Padding(
@@ -412,13 +443,52 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
                     children: [
                       detail('Canal', account['name']),
                       detail('Número', account['display_phone_number']),
-                      detail('WABA', account['business_account_id']),
-                      detail('Phone Number ID', account['phone_number_id']),
-                      detail('Modalidad', account['onboarding_mode']),
+                      detail('Conexión', switch (account['onboarding_mode']) {
+                        'coexistence' => 'Coexistencia',
+                        'cloud_api' =>
+                          'Cloud API antigua · sin coexistencia acreditada',
+                        _ => 'Modalidad no confirmada',
+                      }),
                       detail('Estado guardado', account['status']),
+                      Text(
+                        account['onboarding_mode'] == 'coexistence'
+                            ? 'Coexistencia guardada al autorizar con Meta. El estado guardado '
+                                  'no garantiza el acceso actual ni la entrega de mensajes.'
+                            : 'Este registro no acredita el uso simultáneo con WhatsApp Business '
+                                  'móvil. La empresa debe completar la autorización por coexistencia.',
+                      ),
+                      ExpansionTile(
+                        key: ValueKey('account-$tenantId-${account['id']}'),
+                        title: const Text(
+                          'Identificadores técnicos de la cuenta',
+                        ),
+                        children: [
+                          detail('WABA', account['business_account_id']),
+                          detail('Phone Number ID', account['phone_number_id']),
+                        ],
+                      ),
                     ],
                   ),
                 ),
+              ),
+            if (integration != null)
+              ExpansionTile(
+                key: ValueKey('integration-$tenantId'),
+                title: const Text('Identificadores técnicos de la integración'),
+                children: [
+                  const Text(
+                    'Datos guardados en Supabase, asignados por Meta a la empresa. '
+                    'No son el App ID ni el Config ID globales de ITONE.',
+                  ),
+                  detail(
+                    'WABA de la integración',
+                    integration['business_account_id'],
+                  ),
+                  detail(
+                    'Phone Number ID de la integración',
+                    integration['phone_number_id'],
+                  ),
+                ],
               ),
           ],
           OutlinedButton.icon(
@@ -426,10 +496,11 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
             icon: const Icon(Icons.verified_outlined),
             label: const Text('Validar conexión con Meta'),
           ),
-          const Text(
-            'Consulta Meta y actualiza el estado de la integración seleccionada. '
-            'No conecta, registra, elimina ni migra el número. No garantiza la entrega de mensajes.',
-          ),
+          if (integration != null)
+            const Text(
+              'Consulta Meta y actualiza el estado de la integración seleccionada. '
+              'No conecta, registra, elimina ni migra el número. No garantiza la entrega de mensajes.',
+            ),
           if (validation != null) ...[
             detail('Resultado', validation!['message']),
             detail('Estado', validation!['status']),
