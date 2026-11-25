@@ -1,5 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { accountToken, graphVersion, WhatsAppError } from "../_shared/whatsapp.ts";
+import {
+  accountToken,
+  graphVersion,
+  WhatsAppError,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,10 +19,11 @@ function json(body: Record<string, unknown>, status = 200) {
 }
 
 function isAllowedRole(role: string | null | undefined) {
-  return role === "tenant_admin" || role === "supervisor" || role === "operator";
+  return role === "tenant_admin" || role === "supervisor" ||
+    role === "operator";
 }
 
-Deno.serve(async (request) => {
+export async function sendWhatsAppMessage(request: Request) {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -45,7 +50,9 @@ Deno.serve(async (request) => {
       data: { user },
       error: userError,
     } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Authentication required" }, 401);
+    if (userError || !user) {
+      return json({ error: "Authentication required" }, 401);
+    }
 
     const body = await request.json();
     const tenantId = body?.tenant_id;
@@ -64,20 +71,26 @@ Deno.serve(async (request) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const { data: role, error: membershipError } = await userClient.rpc(
-      "current_tenant_role", { p_tenant_id: tenantId },
+      "current_tenant_role",
+      { p_tenant_id: tenantId },
     );
     if (membershipError) throw membershipError;
     if (!isAllowedRole(role)) {
-      return json({ error: "You are not allowed to send WhatsApp messages" }, 403);
+      return json(
+        { error: "You are not allowed to send WhatsApp messages" },
+        403,
+      );
     }
-    const { data: disabled, error: disabledError } = await userClient.rpc("is_current_user_disabled");
+    const { data: disabled, error: disabledError } = await userClient.rpc(
+      "is_current_user_disabled",
+    );
     if (disabledError) throw disabledError;
     if (disabled) return json({ error: "User access is disabled" }, 403);
 
     const { data: conversation, error: conversationError } = await adminClient
       .from("whatsapp_conversations")
       .select(
-        "id, tenant_id, whatsapp_account_id, contact_id, whatsapp_accounts(phone_number_id, status), whatsapp_contacts(phone_number)",
+        "id, tenant_id, whatsapp_account_id, contact_id, whatsapp_accounts(phone_number_id, status), whatsapp_contacts(phone_number, whatsapp_user_id, whatsapp_account_id, tenant_id)",
       )
       .eq("id", conversationId)
       .eq("tenant_id", tenantId)
@@ -92,31 +105,62 @@ Deno.serve(async (request) => {
       ? conversation.whatsapp_contacts[0]
       : conversation.whatsapp_contacts;
     const phoneNumberId = account?.phone_number_id;
-    const recipient = contact?.phone_number;
+    const recipient = contact?.phone_number?.trim() ||
+      (contact?.whatsapp_account_id === conversation.whatsapp_account_id
+        ? contact?.whatsapp_user_id?.trim()
+        : undefined);
     if (
       account?.status !== "active" ||
       typeof phoneNumberId !== "string" ||
-      typeof recipient !== "string"
+      typeof recipient !== "string" || !recipient ||
+      contact?.tenant_id !== tenantId
     ) {
-      return json({ error: "WhatsApp account or recipient is not configured" }, 400);
+      console.warn("WhatsApp sending identity unavailable", {
+        accountActive: account?.status === "active",
+        hasRecipient: Boolean(recipient),
+        contactTenantMatches: contact?.tenant_id === tenantId,
+      });
+      return json({
+        error:
+          "No se encontró una cuenta activa o un destinatario de WhatsApp válido para esta empresa.",
+      }, 409);
     }
 
-    const { data: lastInbound, error: inboundError } = await adminClient.from("whatsapp_messages")
+    const { data: lastInbound, error: inboundError } = await adminClient.from(
+      "whatsapp_messages",
+    )
       .select("provider_timestamp,created_at").eq("tenant_id", tenantId)
-      .eq("conversation_id", conversationId).eq("direction", "inbound").eq("source", "cloud_api")
+      .eq("conversation_id", conversationId).eq("direction", "inbound").eq(
+        "source",
+        "cloud_api",
+      )
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (inboundError) throw inboundError;
-    const timestamp = lastInbound?.provider_timestamp ?? lastInbound?.created_at;
-    if (!timestamp || Date.now() - Date.parse(timestamp) >= 24 * 60 * 60 * 1000) {
-      return json({ error: "La ventana de atención de 24 horas expiró. El cliente debe escribir nuevamente o recibir una plantilla aprobada." }, 409);
+    const timestamp = lastInbound?.provider_timestamp ??
+      lastInbound?.created_at;
+    if (
+      !timestamp || Date.now() - Date.parse(timestamp) >= 24 * 60 * 60 * 1000
+    ) {
+      return json({
+        error:
+          "La ventana de atención de 24 horas expiró. El cliente debe escribir nuevamente o recibir una plantilla aprobada.",
+      }, 409);
     }
     const { error: pauseError } = await userClient.rpc("control_whatsapp_bot", {
-      p_tenant_id: tenantId, p_conversation_id: conversationId, p_action: "pause",
+      p_tenant_id: tenantId,
+      p_conversation_id: conversationId,
+      p_action: "pause",
     });
     if (pauseError) throw pauseError;
-    const accessToken = await accountToken(adminClient, tenantId, phoneNumberId);
+    const accessToken = await accountToken(
+      adminClient,
+      tenantId,
+      phoneNumberId,
+    );
     const graphResponse = await fetch(
-      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(phoneNumberId)}/messages`,
+      `https://graph.facebook.com/${graphVersion()}/${
+        encodeURIComponent(phoneNumberId)
+      }/messages`,
       {
         method: "POST",
         headers: {
@@ -158,7 +202,10 @@ Deno.serve(async (request) => {
         message_type: "text",
         body: messageBody.trim(),
         delivery_status: "accepted",
-      }, { onConflict: "whatsapp_account_id,provider_message_id", ignoreDuplicates: true });
+      }, {
+        onConflict: "whatsapp_account_id,provider_message_id",
+        ignoreDuplicates: true,
+      });
     if (insertError) throw insertError;
 
     const { error: updateError } = await adminClient
@@ -174,7 +221,11 @@ Deno.serve(async (request) => {
     return json({ ok: true, provider_message_id: providerMessageId });
   } catch (error) {
     console.error("WhatsApp send error", error);
-    if (error instanceof WhatsAppError) return json({ error: error.message }, error.status);
+    if (error instanceof WhatsAppError) {
+      return json({ error: error.message }, error.status);
+    }
     return json({ error: "Unexpected WhatsApp sending error" }, 500);
   }
-});
+}
+
+if (import.meta.main) Deno.serve(sendWhatsAppMessage);

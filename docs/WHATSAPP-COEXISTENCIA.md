@@ -32,6 +32,12 @@ el webhook para enviar, recibir e importar mensajes.
 
 ### Separacion entre plataforma y empresas
 
+Las respuestas manuales aceptan el telefono del contacto o, cuando Meta no lo
+incluye, su `whatsapp_user_id`. Este ultimo solo se utiliza si pertenece a la
+misma cuenta de WhatsApp de la conversacion; ambos casos requieren que el
+contacto pertenezca a la empresa. No se inventan telefonos ni se usa un token
+global como sustituto de la autorizacion de coexistencia.
+
 - **ITONE Platform > WhatsApp y Meta**: solo `platform_owner` puede consultar
   App ID, Config ID de Embedded Signup, version de Graph, URL del webhook y
   presencia de los secretos globales. **Editar configuracion de Meta** permite
