@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { executeFlow, type RuntimeGraph, type RuntimeState } from "../_shared/automation_runtime.ts";
 import { executeExternalResource } from "../_shared/external_api.ts";
-import { graphVersion } from "../_shared/whatsapp.ts";
+import { graphVersion, messageRecipient } from "../_shared/whatsapp.ts";
 
 interface Job {
   id: string;
@@ -44,9 +44,10 @@ async function processJob(client: SupabaseClient, job: Job) {
     const conversation = checked(await client.from("whatsapp_conversations").select("contact_id")
       .eq("tenant_id", job.tenant_id).eq("id", job.conversation_id).single());
     if (!conversation) throw new Error("Conversación no disponible");
-    const contact = checked(await client.from("whatsapp_contacts").select("phone_number,whatsapp_user_id,display_name,profile_name")
+    const contact = checked(await client.from("whatsapp_contacts").select("phone_number,whatsapp_user_id,whatsapp_account_id,display_name,profile_name")
       .eq("tenant_id", job.tenant_id).eq("id", conversation.contact_id).single());
     if (!contact || !(contact.phone_number ?? contact.whatsapp_user_id)) throw new Error("Contacto no disponible");
+    const recipient = messageRecipient(contact, job.account_id);
     const inbound = job.message_id ? checked(await client.from("whatsapp_messages")
       .select("body,message_type,provider_timestamp,created_at").eq("id", job.message_id)
       .eq("tenant_id", job.tenant_id).eq("conversation_id", job.conversation_id).single()) : null;
@@ -107,7 +108,7 @@ async function processJob(client: SupabaseClient, job: Job) {
           `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(account.phone_number_id)}/messages`, {
             method: "POST",
             headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ messaging_product: "whatsapp", to: contact.phone_number ?? contact.whatsapp_user_id,
+            body: JSON.stringify({ messaging_product: "whatsapp", ...recipient,
               type: "text", text: { body: text, preview_url: false } }),
             signal: AbortSignal.timeout(15000),
           },

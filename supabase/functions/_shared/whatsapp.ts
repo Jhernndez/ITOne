@@ -21,6 +21,23 @@ export function graphVersion() {
   return Deno.env.get("META_GRAPH_VERSION") ?? "v23.0";
 }
 
+export function messageRecipient(
+  contact: {
+    phone_number?: string | null;
+    whatsapp_user_id?: string | null;
+    whatsapp_account_id?: string | null;
+  },
+  accountId: string,
+): { to: string; recipient?: never } | { recipient: string; to?: never } {
+  const phone = contact.phone_number?.trim();
+  if (phone) return { to: phone };
+  const userId = contact.whatsapp_user_id?.trim();
+  if (userId && contact.whatsapp_account_id === accountId) {
+    return { recipient: userId };
+  }
+  throw new WhatsAppError("No hay un destinatario de WhatsApp válido para esta cuenta.", 409);
+}
+
 export interface GraphError {
   message?: string;
   code?: number;

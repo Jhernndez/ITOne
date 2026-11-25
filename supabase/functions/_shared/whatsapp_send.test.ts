@@ -93,7 +93,8 @@ Deno.test("manual replies support account-scoped WhatsApp user IDs without phone
     const response = await sendWhatsAppMessage(request());
     assert.equal(response.status, 200);
     assert.equal((await response.json()).ok, true);
-    assert.equal(sent[0].to, "user-recipient");
+    assert.equal(sent[0].recipient, "user-recipient");
+    assert.ok(!("to" in sent[0]));
   });
 });
 Deno.test("manual replies preserve phone recipient behavior", async () => {
@@ -105,6 +106,7 @@ Deno.test("manual replies preserve phone recipient behavior", async () => {
   }, async (sent) => {
     assert.equal((await sendWhatsAppMessage(request())).status, 200);
     assert.equal(sent[0].to, "123456789");
+    assert.ok(!("recipient" in sent[0]));
   });
 });
 for (

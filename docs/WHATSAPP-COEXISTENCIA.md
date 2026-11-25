@@ -35,7 +35,9 @@ el webhook para enviar, recibir e importar mensajes.
 Las respuestas manuales aceptan el telefono del contacto o, cuando Meta no lo
 incluye, su `whatsapp_user_id`. Este ultimo solo se utiliza si pertenece a la
 misma cuenta de WhatsApp de la conversacion; ambos casos requieren que el
-contacto pertenezca a la empresa. No se inventan telefonos ni se usa un token
+contacto pertenezca a la empresa. Los envios manuales y del bot usan `to` para
+telefonos y `recipient` para BSUID, como exige la API de Meta; no son campos
+intercambiables. No se inventan telefonos ni se usa un token
 global como sustituto de la autorizacion de coexistencia.
 
 - **ITONE Platform > WhatsApp y Meta**: solo `platform_owner` puede consultar

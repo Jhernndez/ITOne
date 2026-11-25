@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   accountToken,
   graphVersion,
+  messageRecipient,
   WhatsAppError,
 } from "../_shared/whatsapp.ts";
 
@@ -170,7 +171,7 @@ export async function sendWhatsAppMessage(request: Request) {
         body: JSON.stringify({
           messaging_product: "whatsapp",
           recipient_type: "individual",
-          to: recipient,
+          ...messageRecipient(contact, conversation.whatsapp_account_id),
           type: "text",
           text: { preview_url: false, body: messageBody.trim() },
         }),

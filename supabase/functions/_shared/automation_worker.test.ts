@@ -10,6 +10,7 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
   Deno.env.set(env[2], "service-test-key");
   let claims = 0, sends = 0, persisted = 0;
   let enabled = true, uncertain = false, paused = false;
+  let useBsuid = false;
   let finished: string | null = null;
   let effectStatus = "";
   let session: Record<string, unknown> | null = null;
@@ -26,7 +27,13 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
     if (url.hostname === "graph.facebook.com") {
       sends++;
       const body = await request.json();
-      assert.equal(body.to, "573001234567");
+      if (useBsuid) {
+        assert.equal(body.recipient, "US.test-recipient");
+        assert.ok(!("to" in body));
+      } else {
+        assert.equal(body.to, "573001234567");
+        assert.ok(!("recipient" in body));
+      }
       assert.equal(body.text.body, "Hola Empresa");
       if (uncertain) throw new TypeError("network disconnected after send");
       return reply({ messages: [{ id: "wamid.test" }] });
@@ -58,7 +65,9 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
         case "whatsapp_bot_sessions": return reply(session ? [session] : []);
         case "whatsapp_accounts": return reply({ status: "active", onboarding_mode: "coexistence", phone_number_id: "phone", access_token: "account-test-token" });
         case "whatsapp_conversations": return reply({ contact_id: "contact" });
-        case "whatsapp_contacts": return reply({ phone_number: "573001234567", display_name: "Empresa" });
+        case "whatsapp_contacts": return reply({ phone_number: useBsuid ? null : "573001234567",
+          whatsapp_user_id: useBsuid ? "US.test-recipient" : null,
+          whatsapp_account_id: "account", display_name: "Empresa" });
         case "automation_flow_versions": return reply({ graph });
         case "whatsapp_messages":
           return reply(url.searchParams.has("id")
@@ -94,6 +103,10 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
     assert.match(String(finished), /network disconnected/);
     await run();
     assert.equal(sends, 2);
+    reset(); uncertain = false; useBsuid = true;
+    await run();
+    assert.equal(sends, 3); assert.equal(persisted, 2);
+    assert.equal(finished, "done"); assert.equal(effectStatus, "confirmed");
   } finally {
     globalThis.fetch = original;
     env.forEach((key, i) => before[i] === undefined ? Deno.env.delete(key) : Deno.env.set(key, before[i]!));
