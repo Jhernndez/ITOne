@@ -39,11 +39,12 @@ onboarding no comienza mientras estos eventos no esten activos. Suscribirse
 despues no garantiza recuperar mensajes anteriores: no repitas solicitudes
 de historial ya realizadas ni desregistres numeros para probar.
 
-Las imagenes y stickers nuevos guardan el ID de media de Meta. **Ver imagen**
-descarga el archivo bajo demanda mediante `whatsapp-message-image`, con
+Las imagenes y stickers nuevos guardan el ID de media de Meta. El visor
+descarga automaticamente al aparecer en la conversacion mediante `whatsapp-message-image`, con
 autenticacion, permisos de empresa/cuenta, token exclusivo del servidor y
 limite de 5 MB (JPEG/PNG/WebP). Las URLs y tokens no llegan al navegador. Los
 archivos vencidos o ausentes en historial muestran un error explicito.
+Tocar la imagen abre la vista ampliada; si la descarga falla, se ofrece reintento.
 Aplica `20261125234000_whatsapp_image_media.sql` antes de desplegar webhook y
 visor; no es una importacion retroactiva de adjuntos perdidos.
 

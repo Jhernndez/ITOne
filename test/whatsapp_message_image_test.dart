@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,7 +8,34 @@ import 'package:itone/features/whatsapp/message_image.dart';
 
 void main() {
   testWidgets(
-    'image downloads only on request, renders and opens zoom dialog',
+    'automatic image load shows progress and ignores an old tenant response',
+    (t) async {
+      final old = Completer<Uint8List>();
+      final current = Completer<Uint8List>();
+      Widget page(String tenant, Completer<Uint8List> load) => MaterialApp(
+        home: Scaffold(
+          body: WhatsAppMessageImage(
+            tenantId: tenant,
+            messageId: 'message',
+            loader: () => load.future,
+          ),
+        ),
+      );
+      await t.pumpWidget(page('first', old));
+      expect(find.text('Cargando imagen…'), findsOneWidget);
+      await t.pumpWidget(page('second', current));
+      old.completeError(StateError('old tenant'));
+      await t.pump();
+      expect(find.text('Cargando imagen…'), findsOneWidget);
+      expect(find.text('Reintentar imagen'), findsNothing);
+      current.completeError(StateError('offline'));
+      await t.pumpAndSettle();
+      expect(find.text('Reintentar imagen'), findsOneWidget);
+      expect(t.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'image downloads automatically, renders and opens zoom without downloading again',
     (t) async {
       var loads = 0;
       final bytes = base64Decode(
@@ -26,8 +55,8 @@ void main() {
           ),
         ),
       );
-      expect(loads, 0);
-      await t.tap(find.text('Ver imagen'));
+      expect(loads, 1);
+      expect(find.text('Ver imagen'), findsNothing);
       await t.pumpAndSettle();
       expect(loads, 1);
       expect(find.byType(Image), findsOneWidget);
@@ -36,6 +65,7 @@ void main() {
       expect(find.byType(InteractiveViewer), findsOneWidget);
       await t.tap(find.text('Cerrar'));
       await t.pumpAndSettle();
+      expect(loads, 1);
       expect(t.takeException(), isNull);
     },
   );
@@ -51,7 +81,6 @@ void main() {
         ),
       ),
     );
-    await t.tap(find.text('Ver imagen'));
     await t.pumpAndSettle();
     expect(find.text('Reintentar imagen'), findsOneWidget);
     expect(
