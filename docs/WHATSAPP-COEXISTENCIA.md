@@ -34,9 +34,20 @@ el webhook para enviar, recibir e importar mensajes.
 
 - **ITONE Platform > WhatsApp y Meta**: solo `platform_owner` puede consultar
   App ID, Config ID de Embedded Signup, version de Graph, URL del webhook y
-  presencia de los secretos globales. Los valores se administran en Supabase >
-  Edge Functions > Secrets; esta pantalla no edita ni devuelve App Secret,
-  verify token o tokens de empresas. La configuracion global no es un numero.
+  presencia de los secretos globales. **Editar configuracion de Meta** permite
+  actualizar los IDs y enviar App Secret/verify token sin revelar los valores
+  almacenados; los campos vacios conservan los secretos anteriores. Las
+  actualizaciones se guardan en Vault mediante RPCs exclusivos de `service_role`.
+  Si no hay actualizaciones, se usan los valores existentes de Edge Functions >
+  Secrets. La version de Graph sigue en `META_GRAPH_VERSION`. La configuracion
+  global no es un numero; nunca se muestran tokens de empresas.
+- **Comprobar aplicacion de Meta** verifica App ID/App Secret y consulta la
+  suscripcion del webhook. No certifica la modalidad del Config ID ni la
+  elegibilidad de un numero. Cambiar el token de verificacion exige actualizarlo
+  tambien en Meta; cambiar App ID exige ingresar el App Secret de la nueva app.
+  Aplica primero `20261125195500_platform_meta_configuration.sql` y despues
+  publica `platform-whatsapp-settings`, `connect-whatsapp-coexistence` y
+  `whatsapp-webhook`. No cambies secretos solo para probar la conexion.
 - En esa pantalla, el propietario selecciona una empresa para consultar sus
   cuentas, WABA, Phone Number ID y estado guardado. **Validar conexion con Meta**
   consulta restricciones y actualiza el estado de esa integracion. No incorpora,

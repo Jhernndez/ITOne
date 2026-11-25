@@ -30,6 +30,7 @@ jobs:
           supabase/tests/automation_flows_test.ts
           supabase/tests/external_api_test.ts
           supabase/tests/whatsapp_bot_test.ts
+          supabase/tests/platform_meta_configuration_test.ts
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

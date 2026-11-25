@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { json } from "../_shared/whatsapp.ts";
+import { platformMetaConfiguration } from "../_shared/platform_meta.ts";
 import {
   historyState, normalizeMessages, object, objects, validSignature,
 } from "../_shared/whatsapp_webhook.ts";
@@ -8,7 +9,15 @@ declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
 Deno.serve(async (request) => {
   if (request.method === "GET") {
     const url = new URL(request.url);
-    const verifyToken = Deno.env.get("WHATSAPP_VERIFY_TOKEN");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !key) return new Response("Webhook not configured", { status: 503 });
+    let verifyToken;
+    try {
+      ({ verifyToken } = await platformMetaConfiguration(createClient(supabaseUrl, key)));
+    } catch {
+      console.error("Webhook verification configuration unavailable");
+      return new Response("Webhook configuration unavailable", { status: 503 });
+    }
     const challenge = url.searchParams.get("hub.challenge");
     if (verifyToken && url.searchParams.get("hub.mode") === "subscribe" &&
         url.searchParams.get("hub.verify_token") === verifyToken && challenge) {
@@ -20,17 +29,16 @@ Deno.serve(async (request) => {
   try {
     const url = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const appSecret = Deno.env.get("META_APP_SECRET");
-    if (!url || !serviceKey || !appSecret) {
-      throw new Error("Supabase and META_APP_SECRET must be configured");
-    }
+    if (!url || !serviceKey) throw new Error("Supabase must be configured");
+    const client = createClient(url, serviceKey);
+    const { appSecret } = await platformMetaConfiguration(client);
+    if (!appSecret) throw new Error("META_APP_SECRET must be configured");
     const raw = await request.text();
     if (!await validSignature(raw, request.headers.get("X-Hub-Signature-256"), appSecret)) {
       console.warn("WhatsApp webhook signature rejected");
       return json({ error: "Invalid webhook signature" }, 401);
     }
     const payload = object(JSON.parse(raw));
-    const client = createClient(url, serviceKey);
     let hasInbound = false;
     for (const entry of objects(payload.entry)) {
       for (const change of objects(entry.changes)) {

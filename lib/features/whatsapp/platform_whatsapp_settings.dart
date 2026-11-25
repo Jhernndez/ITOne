@@ -4,6 +4,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class PlatformWhatsAppRepository {
   PlatformWhatsAppRepository(this.client);
   final SupabaseClient client;
+  Future<Map<String, dynamic>> saveConfiguration(
+    Map<String, String> values,
+  ) async {
+    final response = await client.functions.invoke(
+      'platform-whatsapp-settings',
+      body: {'action': 'save_configuration', ...values},
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
 
   Future<Map<String, dynamic>> call(String action, {String? tenantId}) async {
     final response = await client.functions.invoke(
@@ -35,10 +44,24 @@ class PlatformWhatsAppSettings extends StatefulWidget {
 class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
   late final repository =
       widget.repository ?? PlatformWhatsAppRepository(Supabase.instance.client);
-  Map<String, dynamic>? configuration, diagnostics, validation;
+  Map<String, dynamic>? configuration, diagnostics, validation, appValidation;
   List<Map<String, dynamic>> tenants = [];
   String? tenantId, error;
   bool busy = true;
+  String? notice;
+  final _appId = TextEditingController();
+  final _configId = TextEditingController();
+  final _appSecret = TextEditingController();
+  final _verifyToken = TextEditingController();
+
+  @override
+  void dispose() {
+    _appId.dispose();
+    _configId.dispose();
+    _appSecret.dispose();
+    _verifyToken.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -69,6 +92,8 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
 
   Future<void> load() => run(() async {
     final config = await repository.call('configuration');
+    if (!mounted) return;
+    setState(() => configuration = config);
     final result = await repository.call('tenants');
     if (!mounted) return;
     setState(() {
@@ -96,6 +121,131 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
     setState(() => validation = result);
     await readDiagnostics();
   });
+
+  Future<void> checkApp() => run(() async {
+    setState(() => appValidation = null);
+    final result = await repository.call('check_app');
+    if (mounted) setState(() => appValidation = result);
+  });
+
+  Future<void> editConfiguration() async {
+    final appId = _appId..text = configuration?['app_id'] as String? ?? '';
+    final configId = _configId
+      ..text = configuration?['config_id'] as String? ?? '';
+    final appSecret = _appSecret..clear();
+    final verifyToken = _verifyToken..clear();
+    final form = GlobalKey<FormState>();
+    final values = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Configurar aplicación de Meta'),
+        content: SizedBox(
+          width: 500,
+          child: Form(
+            key: form,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Una configuración global para ITONE. No ingreses el teléfono ni tokens de cada cliente. '
+                    'Los secretos están protegidos: deja los campos vacíos para conservarlos. '
+                    'Cambiar el token del webhook requiere actualizar también su verificación en Meta.',
+                  ),
+                  TextFormField(
+                    controller: appId,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'App ID'),
+                    validator: (v) =>
+                        RegExp(r'^\d{5,30}$').hasMatch(v?.trim() ?? '')
+                        ? null
+                        : 'ID numérico obligatorio',
+                  ),
+                  TextFormField(
+                    controller: configId,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Embedded Signup Config ID',
+                    ),
+                    validator: (v) =>
+                        RegExp(r'^\d{5,30}$').hasMatch(v?.trim() ?? '')
+                        ? null
+                        : 'ID numérico obligatorio',
+                  ),
+                  TextFormField(
+                    controller: appSecret,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: 'App Secret (opcional)',
+                      hintText: configuration?['app_secret_configured'] == true
+                          ? 'Configurado · dejar vacío para conservar'
+                          : 'Falta configurar',
+                    ),
+                  ),
+                  TextFormField(
+                    controller: verifyToken,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: 'Token de verificación del webhook (opcional)',
+                      hintText:
+                          configuration?['webhook_verify_token_configured'] ==
+                              true
+                          ? 'Configurado · dejar vacío para conservar'
+                          : 'Falta configurar',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(context, <String, String>{
+                'app_id': appId.text.trim(),
+                'config_id': configId.text.trim(),
+                if (appSecret.text.trim().isNotEmpty)
+                  'app_secret': appSecret.text.trim(),
+                if (verifyToken.text.trim().isNotEmpty)
+                  'verify_token': verifyToken.text.trim(),
+              });
+            },
+            child: const Text('Verificar y guardar'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) {
+      values?.clear();
+      return;
+    }
+    appSecret.clear();
+    verifyToken.clear();
+    if (values == null || !mounted) return;
+    await run(() async {
+      final result = await repository.saveConfiguration(values);
+      final config = await repository.call('configuration');
+      if (mounted) {
+        setState(() {
+          configuration = config;
+          appValidation = null;
+          notice = result['message'] as String?;
+        });
+      }
+    });
+    values.remove('app_secret');
+    values.remove('verify_token');
+  }
 
   Widget detail(String label, Object? value) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 5),
@@ -126,6 +276,7 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
               error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
+          if (notice != null) Text(notice!),
           OutlinedButton(
             onPressed: busy ? null : load,
             child: const Text('Actualizar configuración'),
@@ -140,6 +291,22 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
             detail('Embedded Signup Config ID', config['config_id']),
             detail('Graph API', config['graph_version']),
             detail('Webhook', config['webhook_url']),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: busy ? null : editConfiguration,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Editar configuración de Meta'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: busy ? null : checkApp,
+                  icon: const Icon(Icons.verified_outlined),
+                  label: const Text('Comprobar aplicación de Meta'),
+                ),
+              ],
+            ),
             detail(
               'App Secret',
               config['app_secret_configured'] == true
@@ -153,9 +320,9 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
                   : 'Falta configurar',
             ),
             const Text(
-              'Los valores globales se administran en Supabase → Edge Functions → Secrets: '
-              'META_APP_ID, META_APP_SECRET, META_WHATSAPP_CONFIG_ID, META_GRAPH_VERSION '
-              'y WHATSAPP_VERIFY_TOKEN. Los secretos y tokens de las empresas nunca se muestran aquí. '
+              'Los IDs y secretos existentes de Supabase se conservan. Puedes actualizar la aplicación '
+              'desde esta pantalla; los nuevos secretos se guardan cifrados en Vault y nunca se muestran. '
+              'La versión de Graph se administra en META_GRAPH_VERSION en Supabase. '
               'La configuración global no es un número de WhatsApp.',
             ),
             detail(
@@ -164,6 +331,29 @@ class _PlatformWhatsAppSettingsState extends State<PlatformWhatsAppSettings> {
                   ? 'Configurado'
                   : 'Falta configurar',
             ),
+          ],
+          if (appValidation != null) ...[
+            const Divider(height: 24),
+            detail('Aplicación verificada', appValidation!['app_name']),
+            detail('App ID verificado', appValidation!['app_id']),
+            detail(
+              'Credenciales de aplicación',
+              appValidation!['app_credentials_valid'] == true
+                  ? 'Válidas'
+                  : 'No confirmadas',
+            ),
+            detail(
+              'Webhook de ITONE en Meta',
+              appValidation!['webhook_matches'] == true
+                  ? 'Coincide'
+                  : 'No coincide o no está suscrito',
+            ),
+            detail(
+              'Webhook activo en Meta',
+              appValidation!['webhook_active'] == true ? 'Sí' : 'No confirmado',
+            ),
+            detail('Campos suscritos', appValidation!['webhook_fields']),
+            Text(appValidation!['message'] as String? ?? ''),
           ],
           const SizedBox(height: 24),
           const Text(

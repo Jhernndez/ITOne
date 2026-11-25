@@ -15,6 +15,16 @@ class _Repository extends PlatformWhatsAppRepository {
       );
   final calls = <(String, String?)>[];
   bool denied = false;
+  bool companiesFailed = false;
+  Map<String, String>? saved;
+  @override
+  Future<Map<String, dynamic>> saveConfiguration(
+    Map<String, String> values,
+  ) async {
+    saved = Map.of(values);
+    return {'ok': true, 'message': 'Configuración guardada.'};
+  }
+
   @override
   Future<Map<String, dynamic>> call(String action, {String? tenantId}) async {
     calls.add((action, tenantId));
@@ -26,10 +36,16 @@ class _Repository extends PlatformWhatsAppRepository {
         },
       );
     }
+    if (action == 'tenants' && companiesFailed) {
+      throw const FunctionException(
+        status: 503,
+        details: {'error': 'No se pudo listar las empresas.'},
+      );
+    }
     return switch (action) {
       'configuration' => {
-        'app_id': 'meta-app',
-        'config_id': 'meta-config',
+        'app_id': '2169281667133692',
+        'config_id': '3860984100732128',
         'graph_version': 'v23.0',
         'webhook_url': 'https://example.test/webhook',
         'app_secret_configured': true,
@@ -55,6 +71,15 @@ class _Repository extends PlatformWhatsAppRepository {
         'status': 'restricted',
         'message': 'Meta reporta restricciones.',
         'blocked_entities': ['BLOCKED'],
+      },
+      'check_app' => {
+        'app_id': '2169281667133692',
+        'app_name': 'ITONE',
+        'app_credentials_valid': true,
+        'webhook_matches': true,
+        'webhook_active': true,
+        'webhook_fields': ['messages'],
+        'message': 'Esta prueba no registra números.',
       },
       _ => throw StateError('Unexpected action'),
     };
@@ -95,7 +120,7 @@ void main() {
     (t) async {
       final repo = _Repository();
       await open(t, repo);
-      expect(find.text('App ID: meta-app'), findsOneWidget);
+      expect(find.text('App ID: 2169281667133692'), findsOneWidget);
       expect(find.text('App Secret: Configurado'), findsOneWidget);
       expect(find.text('WABA de la integración: old-waba'), findsOneWidget);
       await t.ensureVisible(find.text('Validar conexión con Meta'));
@@ -134,5 +159,58 @@ void main() {
     expect(find.textContaining('Solo el propietario'), findsOneWidget);
     expect(find.textContaining('App ID:'), findsNothing);
     expect(repo.calls.length, 1);
+  });
+
+  testWidgets(
+    'company load failure retains global config and allows independent app check',
+    (t) async {
+      final repo = _Repository()..companiesFailed = true;
+      await open(t, repo);
+      expect(find.text('App ID: 2169281667133692'), findsOneWidget);
+      expect(
+        find.textContaining('No se pudo listar las empresas'),
+        findsOneWidget,
+      );
+      await t.tap(find.text('Comprobar aplicación de Meta'));
+      await t.pumpAndSettle();
+      expect(repo.calls.last, ('check_app', null));
+      expect(find.text('Credenciales de aplicación: Válidas'), findsOneWidget);
+      expect(find.text('Webhook de ITONE en Meta: Coincide'), findsOneWidget);
+    },
+  );
+
+  testWidgets('owner edits IDs without exposing or replacing blank secrets', (
+    t,
+  ) async {
+    final repo = _Repository();
+    await open(t, repo);
+    await t.tap(find.text('Editar configuración de Meta'));
+    await t.pumpAndSettle();
+    final fields = find.byType(TextFormField);
+    expect(fields, findsNWidgets(4));
+    expect(
+      t.widget<TextFormField>(fields.at(0)).controller!.text,
+      '2169281667133692',
+    );
+    expect(t.widget<TextFormField>(fields.at(2)).controller!.text, isEmpty);
+    expect(t.widget<TextFormField>(fields.at(3)).controller!.text, isEmpty);
+    final secretInput = t.widget<TextField>(
+      find.descendant(of: fields.at(2), matching: find.byType(TextField)),
+    );
+    expect(secretInput.obscureText, isTrue);
+    await t.enterText(fields.at(1), 'bad');
+    await t.tap(find.text('Verificar y guardar'));
+    await t.pumpAndSettle();
+    expect(find.text('ID numérico obligatorio'), findsOneWidget);
+    expect(repo.saved, isNull);
+    await t.enterText(fields.at(1), '3860984100732128');
+    await t.tap(find.text('Verificar y guardar'));
+    await t.pumpAndSettle();
+    expect(repo.saved, {
+      'app_id': '2169281667133692',
+      'config_id': '3860984100732128',
+    });
+    expect(find.text('Configuración guardada.'), findsOneWidget);
+    expect(t.takeException(), isNull);
   });
 }

@@ -1,6 +1,7 @@
 import {
   graph, graphVersion, json, requireTenantAdmin, WhatsAppError, corsHeaders,
 } from "../_shared/whatsapp.ts";
+import { platformMetaConfiguration } from "../_shared/platform_meta.ts";
 
 interface Phone {
   id: string;
@@ -19,12 +20,10 @@ Deno.serve(async (request) => {
       throw new WhatsAppError("tenant_id is required");
     }
     const admin = await requireTenantAdmin(request, body.tenant_id);
-    const appId = Deno.env.get("META_APP_ID");
-    const appSecret = Deno.env.get("META_APP_SECRET");
-    const configId = Deno.env.get("META_WHATSAPP_CONFIG_ID");
+    const { appId, appSecret, configId } = await platformMetaConfiguration(admin);
     if (!appId || !appSecret || !configId) {
       throw new WhatsAppError(
-        "Falta configurar META_APP_ID, META_APP_SECRET y META_WHATSAPP_CONFIG_ID en Supabase.",
+        "Falta la configuración global de Meta. Contacta al propietario de ITONE Platform.",
         503,
       );
     }
