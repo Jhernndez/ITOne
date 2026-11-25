@@ -4,7 +4,7 @@ enum FlowKind {
   question('Pregunta'),
   options('Opciones'),
   condition('Condición'),
-  api('API simulada'),
+  api('Ejecutar API'),
   review('Revisión de agente'),
   handoff('Transferir a humano'),
   end('Finalizar');

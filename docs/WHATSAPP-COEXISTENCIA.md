@@ -18,7 +18,7 @@ Meta confirma `is_on_biz_app=true` y `platform_type=CLOUD_API`.
   se guardan en transacciones de hasta 200 mensajes; Meta recibe confirmacion
   solo despues de persistirlos. Los reintentos no duplican mensajes.
 
-La conexion anterior de Cloud API permanece visible para diagnostico. No existe
+La conexion anterior de Cloud API permanece visible en Platform para diagnostico. No existe
 una conversion automatica de un numero ya migrado, bloqueado o desconectado del
 celular. Antes de intentar coexistencia con ese numero, consulta su elegibilidad
 y el procedimiento de reincorporacion con Meta. No elimines la cuenta como prueba.
@@ -30,11 +30,56 @@ Integracion > Conectar WhatsApp Business**, mediante Embedded Signup. No se
 requiere una segunda conexion manual. Coexistencia sigue usando Cloud API y
 el webhook para enviar, recibir e importar mensajes.
 
-**Validar conexion con Meta** es un diagnostico opcional del estado y las
-restricciones; no incorpora, registra ni elimina el numero. Las conexiones
-antiguas sin coexistencia se identifican como tales y sus datos quedan
-plegados para diagnostico. No certifican que el numero eliminado en Meta siga
-operativo ni se convierten automaticamente en conexiones de coexistencia.
+### Separacion entre plataforma y empresas
+
+- **ITONE Platform > WhatsApp y Meta**: solo `platform_owner` puede consultar
+  App ID, Config ID de Embedded Signup, version de Graph, URL del webhook y
+  presencia de los secretos globales. Los valores se administran en Supabase >
+  Edge Functions > Secrets; esta pantalla no edita ni devuelve App Secret,
+  verify token o tokens de empresas. La configuracion global no es un numero.
+- En esa pantalla, el propietario selecciona una empresa para consultar sus
+  cuentas, WABA, Phone Number ID y estado guardado. **Validar conexion con Meta**
+  consulta restricciones y actualiza el estado de esa integracion. No incorpora,
+  registra, elimina ni migra el numero. Se conserva el diagnostico de conexiones
+  antiguas sin declararlas conexiones de coexistencia.
+- **Empresa > Configuracion > WhatsApp > Integracion**: el cliente ve su numero,
+  estado sencillo, importacion y boton de autorizacion. No necesita ingresar
+  tokens ni IDs. La vista de plantillas identifica las cuentas por nombre y
+  numero, sin mostrar WABA.
+
+La restriccion de diagnostico se aplica en el servidor, no solo en la navegacion:
+`platform-whatsapp-settings` y `validate-whatsapp-integration` exigen un propietario
+autenticado y no deshabilitado. Los administradores de empresas y los demas roles
+de plataforma no tienen acceso a esos endpoints. La autorizacion de coexistencia
+permanece disponible para el administrador de cada empresa; cada cuenta conserva
+su propio token y webhook compartido con enrutamiento por numero/empresa.
+
+Los IDs publicos de Meta que necesita el SDK siguen llegando al navegador durante
+la autorizacion; no son secretos. Esto separa las pantallas administrativas, no
+convierte los IDs de los activos propios en secretos ni cambia las politicas RLS
+de lectura operativa ya existentes.
+
+La separacion de configuracion no requiere SQL nuevo. Las nuevas respuestas
+automaticas y recursos API si requieren sus migraciones: ver
+[automatizaciones](AUTOMATIONS.md) y [APIs externas](EXTERNAL-API.md).
+Desplegar las funciones junto con el frontend:
+
+```powershell
+supabase functions deploy platform-whatsapp-settings
+supabase functions deploy validate-whatsapp-integration
+supabase functions deploy manage-whatsapp-templates
+```
+
+GitHub/Cloudflare no despliega automaticamente las funciones. Publicar las
+funciones y el frontend como un mismo cambio para evitar una interfaz antigua
+que intente validar conexiones desde una empresa.
+
+Pruebas de esta separacion:
+
+```powershell
+flutter test --no-pub test\platform_whatsapp_settings_test.dart test\whatsapp_connection_header_test.dart test\whatsapp_templates_panel_test.dart
+npx --yes --package=deno deno test --no-lock --allow-env supabase\functions\_shared\platform_whatsapp.test.ts supabase\functions\_shared\whatsapp_templates.test.ts
+```
 
 El panel temporal **Prueba Meta** y su codigo de envio se retiraron. Para retirar
 tambien el endpoint y los secretos de un servidor previamente configurado:

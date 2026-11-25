@@ -1,5 +1,5 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { accountToken, graphVersion, WhatsAppError } from "../_shared/whatsapp.ts";
+import { requirePlatformOwner } from "../_shared/platform_owner.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,42 +14,15 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-Deno.serve(async (request) => {
+export async function validateWhatsAppIntegration(request: Request) {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !serviceRoleKey) {
-    return json({ error: "WhatsApp validation secrets are not configured" }, 500);
-  }
-
   try {
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Authentication required" }, 401);
-    const userClient = createClient(
-      supabaseUrl,
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Authentication required" }, 401);
-
+    const adminClient = await requirePlatformOwner(request);
     const body = await request.json();
     const tenantId = body?.tenant_id;
     if (typeof tenantId !== "string") return json({ error: "tenant_id is required" }, 400);
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: role, error: roleError } = await userClient.rpc(
-      "current_tenant_role", { p_tenant_id: tenantId },
-    );
-    if (roleError) throw roleError;
-    if (role !== "tenant_admin") {
-      return json({ error: "Only tenant or platform administrators can validate WhatsApp" }, 403);
-    }
 
     const { data: integration, error: integrationError } = await adminClient
       .from("tenant_integrations")
@@ -163,4 +136,6 @@ Deno.serve(async (request) => {
     if (error instanceof WhatsAppError) return json({ error: error.message }, error.status);
     return json({ error: "Unexpected validation error" }, 500);
   }
-});
+}
+
+if (import.meta.main) Deno.serve(validateWhatsAppIntegration);

@@ -196,7 +196,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
       if (mounted) {
         setState(
           () => _notice = publish
-              ? 'Versión ${flow!.publishedVersion} publicada solo para simulación. No envía WhatsApps.'
+              ? 'Versión ${flow!.publishedVersion} publicada. Actívala para un número en Configuración → WhatsApp → Respuestas automáticas.'
               : 'Borrador guardado en esta empresa.',
         );
       }
@@ -212,12 +212,12 @@ class _FlowBuilderState extends State<FlowBuilder> {
     }
   }
 
-  Future<void> _new(bool template) async {
+  Future<void> _new() async {
     if (!await _discard() || !mounted) return;
     setState(() {
       _saved = null;
-      _graph = template ? FlowGraph.patientTemplate() : FlowGraph.blank();
-      _name.text = template ? 'Atención EPS y particular' : 'Nuevo flujo';
+      _graph = FlowGraph.blank();
+      _name.text = 'Nuevo flujo';
       _selected = null;
       _connecting = null;
       _transform.value = Matrix4.identity();
@@ -246,9 +246,14 @@ class _FlowBuilderState extends State<FlowBuilder> {
       FlowKind.options => {
         'text': 'Elige una opción',
         'variable': 'opcion_$_counter',
-        'options': 'EPS|Particular',
+        'options': 'Opción 1|Opción 2',
       },
-      FlowKind.condition => {'variable': 'tipo', 'equals': 'EPS'},
+      FlowKind.condition => {'variable': 'respuesta', 'equals': 'Sí'},
+      FlowKind.api => {
+        'query': '{}',
+        'body': '{}',
+        'result_variable': 'api_result',
+      },
       _ => <String, String>{},
     };
     final position = _transform.toScene(at ?? const Offset(80, 60));
@@ -329,7 +334,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
       final selected = await showDialog<FlowVersion>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Versiones de simulación'),
+          title: const Text('Versiones publicadas'),
           content: SizedBox(
             width: 440,
             child: versions.isEmpty
@@ -342,7 +347,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
                       for (final v in versions)
                         ListTile(
                           title: Text('v${v.version} · ${v.name}'),
-                          subtitle: const Text('Inmutable · Solo simulación'),
+                          subtitle: const Text('Inmutable · Probar sin envíos'),
                           trailing: const Icon(Icons.play_arrow),
                           onTap: () => Navigator.pop(context, v),
                         ),
@@ -400,7 +405,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
             children: [
               const Expanded(
                 child: Text(
-                  'Constructor · Solo simulación',
+                  'Constructor de automatizaciones',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -421,14 +426,14 @@ class _FlowBuilderState extends State<FlowBuilder> {
               ),
               if (widget.canEdit)
                 _action(
-                  'Publicar para simulación',
+                  'Publicar versión',
                   Icons.rocket_launch_outlined,
                   _busy ? null : () => _save(publish: true),
                   compact,
                 ),
               const Tooltip(
                 message:
-                    'Publicar no activa WhatsApp ni consulta APIs. Usa datos ficticios. '
+                    'Publicar no activa WhatsApp. Activa una versión por número en Configuración. '
                     'Guarda antes de salir. Supervisor: solo consulta y prueba.',
                 child: Icon(Icons.info_outline, size: 20),
               ),
@@ -548,12 +553,8 @@ class _FlowBuilderState extends State<FlowBuilder> {
                   ),
                 if (widget.canEdit) ...[
                   OutlinedButton(
-                    onPressed: _busy ? null : () => _new(false),
+                    onPressed: _busy ? null : _new,
                     child: const Text('Nuevo flujo'),
-                  ),
-                  OutlinedButton(
-                    onPressed: _busy ? null : () => _new(true),
-                    child: const Text('Plantilla EPS / Particular'),
                   ),
                 ],
                 OutlinedButton(
@@ -1052,6 +1053,8 @@ class _FlowBuilderState extends State<FlowBuilder> {
           _NodeConfiguration(
             key: ObjectKey(node),
             node: node,
+            tenantId: widget.tenantId,
+            repository: _repository,
             enabled: widget.canEdit && !_busy,
             onChanged: (values) => _configure(node, values),
           ),
@@ -1199,10 +1202,14 @@ class _NodeConfiguration extends StatefulWidget {
   const _NodeConfiguration({
     super.key,
     required this.node,
+    required this.tenantId,
+    required this.repository,
     required this.enabled,
     required this.onChanged,
   });
   final FlowNode node;
+  final String tenantId;
+  final FlowRepository repository;
   final bool enabled;
   final ValueChanged<Map<String, String>> onChanged;
 
@@ -1228,11 +1235,39 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
     if (widget.node.kind == FlowKind.options)
       'options': 'Opciones separadas por |',
     if (widget.node.kind == FlowKind.condition) 'equals': 'Es igual a',
+    if (widget.node.kind == FlowKind.api) ...{
+      'resource_id': 'Recurso API',
+      'query': 'Parámetros de consulta (JSON)',
+      'body': 'Cuerpo de solicitud (JSON)',
+      'result_variable': 'Variable de resultado',
+      'result_path': 'Campo de respuesta opcional (body.estado)',
+    },
   };
   late final controllers = {
     for (final key in fields.keys)
       key: TextEditingController(text: widget.node.config[key] ?? ''),
   };
+  List<Map<String, dynamic>> _resources = [];
+  String? _resourceError;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.node.kind == FlowKind.api) _loadResources();
+  }
+
+  Future<void> _loadResources() async {
+    try {
+      final rows = await widget.repository.apiResources(widget.tenantId);
+      if (mounted) setState(() => _resources = rows);
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() => _resourceError = error.message);
+    }
+  }
+
+  void _update() => widget.onChanged({
+    for (final entry in controllers.entries) entry.key: entry.value.text.trim(),
+  });
 
   @override
   void dispose() {
@@ -1247,27 +1282,67 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       for (final field in fields.entries)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: TextField(
-            controller: controllers[field.key],
-            enabled: widget.enabled,
-            maxLength: 1000,
-            minLines: field.key == 'text' ? 3 : 1,
-            maxLines: field.key == 'text' ? 5 : 1,
-            decoration: InputDecoration(
-              labelText: field.value,
-              border: const OutlineInputBorder(),
+        if (field.key == 'resource_id')
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(
+                '${controllers[field.key]!.text}-${_resources.length}',
+              ),
+              initialValue:
+                  _resources.any((r) => r['id'] == controllers[field.key]!.text)
+                  ? controllers[field.key]!.text
+                  : null,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Recurso habilitado para automatización',
+              ),
+              items: _resources
+                  .map(
+                    (r) => DropdownMenuItem(
+                      value: r['id'] as String,
+                      child: Text(
+                        '${r['http_method']} · ${r['name']}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: !widget.enabled
+                  ? null
+                  : (value) {
+                      controllers[field.key]!.text = value ?? '';
+                      _update();
+                    },
             ),
-            onChanged: (_) => widget.onChanged({
-              for (final entry in controllers.entries)
-                entry.key: entry.value.text.trim(),
-            }),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: TextField(
+              controller: controllers[field.key],
+              enabled: widget.enabled,
+              maxLength: 1000,
+              minLines: ['text', 'query', 'body'].contains(field.key) ? 3 : 1,
+              maxLines: ['text', 'query', 'body'].contains(field.key) ? 5 : 1,
+              decoration: InputDecoration(
+                labelText: field.value,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => _update(),
+            ),
           ),
+      if (_resourceError != null)
+        Text('No se pudieron cargar los recursos: $_resourceError'),
+      if (widget.node.kind == FlowKind.api)
+        const Text(
+          'Crea y habilita recursos en Configuración → Integraciones. '
+          'Usa {{variable}} en valores JSON. Lee resultados con {{api_result.body.campo}}.',
         ),
       const Text(
         'Los cambios del bloque se aplican al borrador al escribir. '
-        'Usa {{variable}} para insertar respuestas. Solo datos ficticios.',
+        'Usa {{variable}} para insertar respuestas. '
+        'contact_name, contact_phone y last_message están disponibles al ejecutar en WhatsApp.',
         style: TextStyle(fontSize: 12),
       ),
     ],

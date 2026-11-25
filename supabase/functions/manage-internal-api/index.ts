@@ -1,311 +1,168 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  corsHeaders,
+  json,
+  requireTenantAdmin,
+  WhatsAppError,
+} from "../_shared/whatsapp.ts";
+import {
+  executeExternalRequest,
+  executeExternalResource,
+  ExternalApiError,
+  mergeCredentials,
+  safeBaseUrl,
+} from "../_shared/external_api.ts";
 
-// Manages tenant-scoped internal API integrations that require secret
-// credentials (API key, bearer token, basic auth). Credentials are only ever
-// written/read by this function using the service role key; the Flutter
-// frontend never receives `auth_config` back and column-level grants on
-// `tenant_api_integrations.auth_config` are revoked for `authenticated`.
-//
-// Actions:
-//   upsert_integration  - create/update an integration, including its secrets.
-//   test_connection     - perform a lightweight request against the base URL.
-//   execute_resource    - manually invoke one configured resource (path + method).
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function json(body: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-const AUTH_TYPES = ["none", "api_key", "bearer_token", "basic"] as const;
-type AuthType = typeof AUTH_TYPES[number];
-
-function isPrivateHost(hostname: string): boolean {
-  const lower = hostname.toLowerCase();
-  if (["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(lower)) return true;
-  const ipv4 = lower.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const a = Number(ipv4[1]);
-    const b = Number(ipv4[2]);
-    if (a === 10) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 127) return true;
-  }
-  return false;
-}
-
-function assertSafeUrl(rawUrl: string): URL {
-  const url = new URL(rawUrl);
-  if (url.protocol !== "https:") {
-    throw new Error("Solo se permiten URLs https://");
-  }
-  if (isPrivateHost(url.hostname)) {
-    throw new Error("El destino de la API no es válido (host privado o reservado)");
-  }
-  return url;
-}
-
-function buildAuthHeaders(
-  authType: AuthType,
-  authConfig: Record<string, unknown>,
-): Record<string, string> {
-  switch (authType) {
-    case "api_key": {
-      const headerName = String(authConfig.header_name ?? "X-API-Key").trim() || "X-API-Key";
-      const headerValue = String(authConfig.header_value ?? "");
-      return { [headerName]: headerValue };
+async function readBody(request: Request): Promise<string> {
+  const reader = request.body?.getReader();
+  if (!reader) throw new ExternalApiError("JSON inválido");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > 96 * 1024) {
+      await reader.cancel();
+      throw new ExternalApiError("Solicitud demasiado grande", 413);
     }
-    case "bearer_token": {
-      const token = String(authConfig.token ?? "");
-      return { Authorization: `Bearer ${token}` };
-    }
-    case "basic": {
-      const username = String(authConfig.username ?? "");
-      const password = String(authConfig.password ?? "");
-      return { Authorization: `Basic ${btoa(`${username}:${password}`)}` };
-    }
-    default:
-      return {};
+    chunks.push(value);
   }
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
   }
+  return new TextDecoder().decode(bytes);
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !serviceRoleKey || !anonKey) {
-    return json({ error: "Supabase secrets are not configured" }, 500);
+  if (request.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
-
+  if (request.method !== "POST") {
+    return json({ error: "Método no permitido" }, 405);
+  }
   try {
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Authentication required" }, 401);
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Authentication required" }, 401);
-
-    const body = await request.json();
-    const action = body?.action;
-    const tenantId = body?.tenant_id;
-    if (typeof tenantId !== "string") return json({ error: "tenant_id is required" }, 400);
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: role, error: roleError } = await userClient.rpc(
-      "current_tenant_role", { p_tenant_id: tenantId },
-    );
-    if (roleError) throw roleError;
-    if (role !== "tenant_admin") {
-      return json({ error: "Solo un administrador del tenant puede gestionar APIs internas" }, 403);
+    const raw = await readBody(request);
+    let input: Record<string, any>;
+    try {
+      input = JSON.parse(raw);
+    } catch {
+      throw new ExternalApiError("JSON inválido");
     }
-
-    if (action === "upsert_integration") {
-      const integrationId = body?.integration_id as string | undefined;
-      const name = String(body?.name ?? "").trim();
-      const baseUrl = String(body?.base_url ?? "").trim();
-      const authType = String(body?.auth_type ?? "none") as AuthType;
-      const incomingAuthConfig = (body?.auth_config ?? {}) as Record<string, unknown>;
-      const enabled = body?.enabled !== false;
-
-      if (!name || !baseUrl) {
-        return json({ error: "Nombre y URL base son obligatorios" }, 400);
+    if (
+      !input || typeof input !== "object" || Array.isArray(input) ||
+      typeof input.tenant_id !== "string" || !input.tenant_id
+    ) {
+      throw new ExternalApiError("tenant_id es obligatorio");
+    }
+    const admin = await requireTenantAdmin(request, input.tenant_id);
+    if (input.action === "upsert_integration") {
+      const { integration_id: id, tenant_id: tenantId, auth_type: type } =
+        input;
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      const base = typeof input.base_url === "string"
+        ? input.base_url.trim()
+        : "";
+      if (!name || name.length > 120 || base.length > 2048) {
+        throw new ExternalApiError("Nombre o URL inválidos");
       }
-      if (!AUTH_TYPES.includes(authType)) {
-        return json({ error: "Tipo de autenticación no soportado" }, 400);
+      safeBaseUrl(base);
+      if (!["none", "api_key", "bearer_token", "basic"].includes(type)) {
+        throw new ExternalApiError("Tipo de autenticación no soportado");
       }
-      try {
-        assertSafeUrl(baseUrl);
-      } catch (error) {
-        return json({ error: (error as Error).message }, 400);
+      if (id !== undefined && (typeof id !== "string" || !id)) {
+        throw new ExternalApiError("Identificador inválido");
       }
-
-      let authConfig: Record<string, unknown> = incomingAuthConfig;
-      if (integrationId) {
-        // Preserve previously stored secret fields when the admin leaves a
-        // field blank while editing (frontend never receives the original
-        // secrets back, so blank means "keep current value").
-        const { data: existing } = await adminClient
-          .from("tenant_api_integrations")
-          .select("auth_type, auth_config")
-          .eq("id", integrationId)
-          .eq("tenant_id", tenantId)
-          .maybeSingle();
-        const existingConfig = (existing?.auth_config ?? {}) as Record<string, unknown>;
-        if (existing?.auth_type === authType) {
-          authConfig = { ...existingConfig };
-          for (const [key, value] of Object.entries(incomingAuthConfig)) {
-            if (typeof value === "string" && value.trim() === "") continue;
-            authConfig[key] = value;
-          }
+      let existingIntegration;
+      if (id) {
+        const { data: existing, error } = await admin.from(
+          "tenant_api_integrations",
+        )
+          .select("auth_type,auth_config").eq("id", id).eq(
+            "tenant_id",
+            tenantId,
+          ).maybeSingle();
+        if (error) throw error;
+        if (!existing) {
+          throw new ExternalApiError("Integración no encontrada", 404);
         }
+        existingIntegration = existing;
       }
-
+      const config = mergeCredentials(
+        type,
+        input.auth_config ?? {},
+        existingIntegration,
+      );
       const payload = {
         tenant_id: tenantId,
         name,
-        base_url: baseUrl,
-        auth_type: authType,
-        auth_config: authConfig,
-        enabled,
+        base_url: base,
+        auth_type: type,
+        auth_config: config,
+        enabled: input.enabled !== false,
         updated_at: new Date().toISOString(),
       };
-
-      if (integrationId) {
-        const { error } = await adminClient
-          .from("tenant_api_integrations")
-          .update(payload)
-          .eq("id", integrationId)
-          .eq("tenant_id", tenantId);
-        if (error) throw error;
-        return json({ ok: true, integration_id: integrationId });
-      } else {
-        const { data, error } = await adminClient
-          .from("tenant_api_integrations")
-          .insert(payload)
-          .select("id")
-          .single();
-        if (error) throw error;
-        return json({ ok: true, integration_id: data.id });
-      }
+      const result = id
+        ? await admin.from("tenant_api_integrations").update(payload).eq(
+          "tenant_id",
+          tenantId,
+        ).eq("id", id).select("id").single()
+        : await admin.from("tenant_api_integrations").insert(payload).select(
+          "id",
+        ).single();
+      if (result.error) throw result.error;
+      return json({ ok: true, integration_id: result.data.id });
     }
-
-    if (action === "test_connection") {
-      const integrationId = body?.integration_id as string | undefined;
-      if (!integrationId) return json({ error: "integration_id es requerido" }, 400);
-      const { data: integration, error } = await adminClient
-        .from("tenant_api_integrations")
-        .select("base_url, auth_type, auth_config")
-        .eq("id", integrationId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
+    if (input.action === "execute_resource") {
+      if (typeof input.resource_id !== "string" || !input.resource_id) {
+        throw new ExternalApiError("resource_id es obligatorio");
+      }
+      const result = await executeExternalResource(admin, {
+        tenantId: input.tenant_id,
+        resourceId: input.resource_id,
+        query: input.query,
+        body: input.body,
+        automation: false,
+      });
+      return json({ ...result });
+    }
+    if (input.action === "test_connection") {
+      if (typeof input.integration_id !== "string" || !input.integration_id) {
+        throw new ExternalApiError("integration_id es obligatorio");
+      }
+      const { data, error } = await admin.from("tenant_api_integrations")
+        .select("base_url,auth_type,auth_config,enabled").eq(
+          "tenant_id",
+          input.tenant_id,
+        )
+        .eq("id", input.integration_id).maybeSingle();
       if (error) throw error;
-      if (!integration) return json({ error: "Integración no encontrada" }, 404);
-
-      let url: URL;
-      try {
-        url = assertSafeUrl(integration.base_url);
-      } catch (urlError) {
-        return json({ ok: false, message: (urlError as Error).message }, 200);
+      if (!data || !data.enabled) {
+        throw new ExternalApiError(
+          "Integración no encontrada o deshabilitada",
+          404,
+        );
       }
-      const headers = buildAuthHeaders(
-        integration.auth_type as AuthType,
-        (integration.auth_config ?? {}) as Record<string, unknown>,
-      );
-      try {
-        const response = await fetchWithTimeout(url.toString(), { method: "GET", headers });
-        return json({
-          ok: response.ok,
-          status_code: response.status,
-          message: response.ok
-            ? "Conexión exitosa."
-            : `El servidor respondió con estado ${response.status}.`,
-        });
-      } catch (fetchError) {
-        return json({
-          ok: false,
-          message: `No fue posible conectar: ${(fetchError as Error).message}`,
-        });
-      }
+      return json({
+        ...await executeExternalRequest(data, {
+          path: "/",
+          http_method: "GET",
+        }),
+      });
     }
-
-    if (action === "execute_resource") {
-      const integrationId = body?.integration_id as string | undefined;
-      const resourceId = body?.resource_id as string | undefined;
-      if (!integrationId || !resourceId) {
-        return json({ error: "integration_id y resource_id son requeridos" }, 400);
-      }
-      const { data: integration, error: integrationError } = await adminClient
-        .from("tenant_api_integrations")
-        .select("base_url, auth_type, auth_config, enabled")
-        .eq("id", integrationId)
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      if (integrationError) throw integrationError;
-      if (!integration || !integration.enabled) {
-        return json({ error: "Integración no encontrada o deshabilitada" }, 404);
-      }
-      const { data: resource, error: resourceError } = await adminClient
-        .from("tenant_api_resources")
-        .select("path, http_method, enabled")
-        .eq("id", resourceId)
-        .eq("tenant_id", tenantId)
-        .eq("integration_id", integrationId)
-        .maybeSingle();
-      if (resourceError) throw resourceError;
-      if (!resource || !resource.enabled) {
-        return json({ error: "Recurso no encontrado o deshabilitado" }, 404);
-      }
-
-      let url: URL;
-      try {
-        url = assertSafeUrl(integration.base_url.replace(/\/$/, "") + resource.path);
-      } catch (urlError) {
-        return json({ ok: false, message: (urlError as Error).message }, 200);
-      }
-      const query = (body?.query ?? {}) as Record<string, unknown>;
-      for (const [key, value] of Object.entries(query)) {
-        if (value !== null && value !== undefined) url.searchParams.set(key, String(value));
-      }
-
-      const headers: Record<string, string> = {
-        ...buildAuthHeaders(
-          integration.auth_type as AuthType,
-          (integration.auth_config ?? {}) as Record<string, unknown>,
-        ),
-      };
-      const method = resource.http_method as string;
-      const hasBody = ["POST", "PUT", "PATCH"].includes(method) && body?.body !== undefined;
-      if (hasBody) headers["Content-Type"] = "application/json";
-
-      try {
-        const response = await fetchWithTimeout(url.toString(), {
-          method,
-          headers,
-          body: hasBody ? JSON.stringify(body.body) : undefined,
-        });
-        const text = await response.text();
-        return json({
-          ok: response.ok,
-          status_code: response.status,
-          response_preview: text.slice(0, 4000),
-        });
-      } catch (fetchError) {
-        return json({
-          ok: false,
-          message: `No fue posible ejecutar el recurso: ${(fetchError as Error).message}`,
-        });
-      }
-    }
-
-    return json({ error: "Acción no soportada" }, 400);
+    throw new ExternalApiError("Acción no soportada");
   } catch (error) {
-    console.error("manage-internal-api error", error);
-    return json({ error: "Error inesperado gestionando la API interna" }, 500);
+    if (error instanceof ExternalApiError || error instanceof WhatsAppError) {
+      return json({
+        error: error.message,
+        ...(error instanceof ExternalApiError
+          ? { outcome: error.outcome }
+          : {}),
+      }, error.status);
+    }
+    console.error("manage-internal-api: error interno");
+    return json({ error: "No fue posible gestionar la API" }, 500);
   }
 });

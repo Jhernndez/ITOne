@@ -22,6 +22,18 @@ class _Repository extends FlowRepository {
   int writes = 0;
   int publications = 0;
   @override
+  Future<List<Map<String, dynamic>>> apiResources(String tenantId) async {
+    tenant = tenantId;
+    return [
+      {
+        'id': '10000000-0000-0000-0000-000000000001',
+        'name': 'Clientes',
+        'http_method': 'GET',
+      },
+    ];
+  }
+
+  @override
   Future<List<SavedFlow>> list(String tenantId) async {
     if (failure != null) throw PostgrestException(message: failure!);
     tenant = tenantId;
@@ -115,6 +127,42 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'API node selects a real tenant resource and persists JSON response mapping',
+    (tester) async {
+      final repository = _Repository();
+      await open(tester, repository);
+      await tap(tester, '+ Ejecutar API');
+      final resource = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Recurso habilitado para automatización',
+      );
+      await tester.ensureVisible(resource);
+      await tester.tap(resource);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('GET · Clientes').last);
+      await tester.pumpAndSettle();
+      final query = find.widgetWithText(
+        TextField,
+        'Parámetros de consulta (JSON)',
+      );
+      await tester.ensureVisible(query);
+      await tester.enterText(query, '{"telefono":"{{contact_phone}}"}');
+      final path = find.widgetWithText(
+        TextField,
+        'Campo de respuesta opcional (body.estado)',
+      );
+      await tester.ensureVisible(path);
+      await tester.enterText(path, 'body.estado');
+      await tap(tester, 'Guardar borrador');
+      final config = repository.flows.single.graph.node('node_1').config;
+      expect(repository.tenant, 'company-one');
+      expect(config['resource_id'], '10000000-0000-0000-0000-000000000001');
+      expect(config['query'], '{"telefono":"{{contact_phone}}"}');
+      expect(config['result_path'], 'body.estado');
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'canvas fills the viewport and moves nodes beyond the old bounds at zoom',
     (tester) async {
@@ -317,7 +365,7 @@ void main() {
   );
 
   testWidgets(
-    'saves moved nodes and publishes immutable simulation versions in selected tenant',
+    'saves moved nodes and publishes immutable versions without activating bots',
     (tester) async {
       final repository = _Repository();
       await open(tester, repository);
@@ -329,12 +377,9 @@ void main() {
       expect(repository.writes, 1);
       expect(repository.tenant, 'company-one');
       expect(repository.flows.single.graph.node('start').x, greaterThan(100));
-      await tap(tester, 'Publicar para simulación');
+      await tap(tester, 'Publicar versión');
       expect(repository.publications, 1);
-      expect(
-        find.textContaining('publicada solo para simulación'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('Actívala para un número'), findsOneWidget);
       await tap(tester, 'Versiones');
       await tap(tester, 'v1 · Nuevo flujo');
       expect(find.textContaining('Probar · Versión 1'), findsOneWidget);
@@ -402,7 +447,7 @@ void main() {
       );
       await open(tester, repository, edit: false);
       expect(find.text('Guardar borrador'), findsNothing);
-      expect(find.text('Publicar para simulación'), findsNothing);
+      expect(find.text('Publicar versión'), findsNothing);
       expect(find.text('Biblioteca de componentes'), findsNothing);
       await tap(tester, 'Probar automatización');
       expect(
@@ -418,7 +463,7 @@ void main() {
     final repository = _Repository();
     await open(tester, repository);
     await tap(tester, '+ Pregunta');
-    await tap(tester, 'Publicar para simulación');
+    await tap(tester, 'Publicar versión');
     expect(find.textContaining('Corrige el flujo'), findsOneWidget);
     expect(repository.publications, 0);
     repository.failure = 'El borrador cambio. Recarga antes de guardar.';
@@ -430,15 +475,14 @@ void main() {
     expect(find.textContaining('Cambios sin guardar'), findsOneWidget);
   });
   testWidgets(
-    'mobile canvas, template and simulation render without overflow',
+    'mobile canvas and simulation render without seeded examples or overflow',
     (tester) async {
       final repository = _Repository();
       await open(tester, repository, mobile: true);
-      await tap(tester, 'Plantilla EPS / Particular');
+      expect(find.text('Plantilla EPS / Particular'), findsNothing);
       await tap(tester, 'Probar automatización');
-      await tap(tester, 'Particular');
       expect(
-        find.text('Bot simulado: ¿Qué servicio particular necesitas?'),
+        find.text('Prueba finalizada · Sin cambios reales.'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);

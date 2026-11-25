@@ -22,7 +22,7 @@ Deno.serve(templatesHandler({
       throw error;
     }
     const { data, error } = await admin.from("whatsapp_accounts")
-      .select("id,business_account_id,access_token,name").eq(
+      .select("id,business_account_id,access_token,name,display_phone_number").eq(
         "tenant_id",
         tenant,
       );

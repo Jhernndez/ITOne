@@ -55,7 +55,7 @@ Deno.serve(async (request) => {
       typeof tenantId !== "string" ||
       typeof conversationId !== "string" ||
       typeof messageBody !== "string" ||
-      !messageBody.trim()
+      !messageBody.trim() || messageBody.trim().length > 4096
     ) {
       return json({
         error: "tenant_id, conversation_id and message are required",
@@ -70,6 +70,9 @@ Deno.serve(async (request) => {
     if (!isAllowedRole(role)) {
       return json({ error: "You are not allowed to send WhatsApp messages" }, 403);
     }
+    const { data: disabled, error: disabledError } = await userClient.rpc("is_current_user_disabled");
+    if (disabledError) throw disabledError;
+    if (disabled) return json({ error: "User access is disabled" }, 403);
 
     const { data: conversation, error: conversationError } = await adminClient
       .from("whatsapp_conversations")
@@ -98,6 +101,19 @@ Deno.serve(async (request) => {
       return json({ error: "WhatsApp account or recipient is not configured" }, 400);
     }
 
+    const { data: lastInbound, error: inboundError } = await adminClient.from("whatsapp_messages")
+      .select("provider_timestamp,created_at").eq("tenant_id", tenantId)
+      .eq("conversation_id", conversationId).eq("direction", "inbound").eq("source", "cloud_api")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (inboundError) throw inboundError;
+    const timestamp = lastInbound?.provider_timestamp ?? lastInbound?.created_at;
+    if (!timestamp || Date.now() - Date.parse(timestamp) >= 24 * 60 * 60 * 1000) {
+      return json({ error: "La ventana de atención de 24 horas expiró. El cliente debe escribir nuevamente o recibir una plantilla aprobada." }, 409);
+    }
+    const { error: pauseError } = await userClient.rpc("control_whatsapp_bot", {
+      p_tenant_id: tenantId, p_conversation_id: conversationId, p_action: "pause",
+    });
+    if (pauseError) throw pauseError;
     const accessToken = await accountToken(adminClient, tenantId, phoneNumberId);
     const graphResponse = await fetch(
       `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(phoneNumberId)}/messages`,
@@ -114,6 +130,7 @@ Deno.serve(async (request) => {
           type: "text",
           text: { preview_url: false, body: messageBody.trim() },
         }),
+        signal: AbortSignal.timeout(15000),
       },
     );
     const graphData = await graphResponse.json();

@@ -73,7 +73,7 @@ void main() {
       run.answer('Servicio');
       run.answer('Error');
       expect(run.finished, isTrue);
-      expect(run.trace.join(), contains('API simulada → Error'));
+      expect(run.trace.join(), contains('Ejecutar API → Error'));
       expect(
         run.messages.any((m) => m.text.contains('sin confirmar la solicitud')),
         isTrue,

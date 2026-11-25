@@ -14,11 +14,7 @@ class WhatsAppConnectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mode = onboardingMode == 'coexistence'
-        ? 'Coexistencia'
-        : onboardingMode == 'cloud_api'
-        ? 'Conexión anterior Cloud API · sin coexistencia'
-        : 'Modalidad por verificar';
+    final coexistence = configured && onboardingMode == 'coexistence';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -32,25 +28,32 @@ class WhatsAppConnectionHeader extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                configured ? 'WhatsApp · $mode' : 'Conectar WhatsApp Business',
+                coexistence
+                    ? 'WhatsApp de tu empresa'
+                    : 'Conectar WhatsApp Business',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        Text('Estado de la conexión en ITONE: $statusLabel'),
+        Text(
+          coexistence
+              ? 'Estado de la conexión: $statusLabel'
+              : configured
+              ? 'Estado de la conexión: requiere autorización'
+              : 'Estado de la conexión: sin conectar',
+        ),
         const Text(
-          'El estado guardado no certifica que Meta permita enviar mensajes '
-          'ni que el número pueda usarse en el celular. Usa Validar conexión con Meta.',
+          'El estado guardado no garantiza la entrega de mensajes. '
+          'Si tienes problemas de conexión, contacta con soporte.',
         ),
         const SizedBox(height: 8),
         const Text(
-          'Coexistencia utiliza Cloud API para enviar y recibir mensajes. '
-          'La opción de conexión con coexistencia permite solicitar el uso del '
-          'mismo número en WhatsApp Business móvil y en ITONE, sujeto a elegibilidad '
-          'y autorización de Meta. Los permisos y las credenciales se gestionan '
-          'por empresa, exclusivamente en backend.',
+          'Conecta tu propio número para usar WhatsApp Business en el celular '
+          'y en ITONE. Autoriza tu cuenta en la ventana de Meta; '
+          'ITONE configura la conexión automáticamente, sujeto a elegibilidad '
+          'y autorización de Meta. No necesitas copiar tokens ni identificadores.',
         ),
       ],
     );

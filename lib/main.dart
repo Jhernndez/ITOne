@@ -8,7 +8,10 @@ import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
 import 'features/automations/flow_builder.dart';
+import 'features/automations/bot_controls.dart';
+import 'features/external_api/external_api_panel.dart';
 import 'features/whatsapp/whatsapp_connection_header.dart';
+import 'features/whatsapp/platform_whatsapp_settings.dart';
 import 'features/whatsapp_templates/whatsapp_templates_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -557,8 +560,8 @@ class _PlatformWorkspacePageState extends State<PlatformWorkspacePage> {
           constraints: const BoxConstraints(maxWidth: 760),
           child: Padding(
             padding: const EdgeInsets.all(32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: ListView(
+              shrinkWrap: true,
               children: [
                 Text(
                   'Administración de plataforma',
@@ -567,6 +570,20 @@ class _PlatformWorkspacePageState extends State<PlatformWorkspacePage> {
                 const SizedBox(height: 8),
                 Text('Rol: ${widget.role}'),
                 const SizedBox(height: 24),
+                if (widget.role == 'platform_owner')
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.chat_outlined),
+                      title: const Text('WhatsApp y Meta'),
+                      subtitle: const Text('Configuración global y diagnóstico por empresa'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PlatformWhatsAppSettings(),
+                        ),
+                      ),
+                    ),
+                  ),
                 const Card(
                   child: ListTile(
                     leading: Icon(Icons.domain),
@@ -3870,7 +3887,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              width: 220,
+              width: MediaQuery.sizeOf(context).width < 1000 ? 64 : 220,
               child: Material(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: ListView(
@@ -3921,9 +3938,9 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                                 Icons.notifications_outlined,
                               ),
                             ].indexOf(item),
-                        leading: Icon(item.$3),
-                        title: Text(item.$1),
-                        subtitle: Text(item.$2),
+                        leading: Tooltip(message: item.$1, child: Icon(item.$3)),
+                        title: MediaQuery.sizeOf(context).width < 1000 ? null : Text(item.$1),
+                        subtitle: MediaQuery.sizeOf(context).width < 1000 ? null : Text(item.$2),
                         onTap: () => setState(
                           () => _settingsTab = const [
                             ('General', 'Cuenta y empresa', Icons.tune),
@@ -4010,10 +4027,8 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                               onSave: _saveRegional,
                             )
                           : _settingsTab == 2
-                          ? _IntegrationsSettings(
+                          ? ExternalApiPanel(
                               tenantId: widget.tenant['id'] as String,
-                              onOpenWhatsAppTab: () =>
-                                  setState(() => _settingsTab = 3),
                             )
                           : _settingsTab == 3
                           ? _WhatsAppSettings(
@@ -4120,866 +4135,6 @@ class _RegionalSettings extends StatelessWidget {
         ),
         if (message != null) ...[const SizedBox(height: 12), Text(message!)],
       ],
-    );
-  }
-}
-
-class _IntegrationsSettings extends StatefulWidget {
-  const _IntegrationsSettings({
-    required this.tenantId,
-    this.onOpenWhatsAppTab,
-  });
-
-  final String tenantId;
-  final VoidCallback? onOpenWhatsAppTab;
-
-  @override
-  State<_IntegrationsSettings> createState() => _IntegrationsSettingsState();
-}
-
-class _IntegrationsSettingsState extends State<_IntegrationsSettings> {
-  List<Map<String, dynamic>> _apiIntegrations = [];
-  Map<String, List<Map<String, dynamic>>> _resourcesByIntegration = {};
-  bool _loading = true;
-  String? _message;
-  String? _whatsappStatus;
-  String? _busyIntegrationId;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadApiIntegrations();
-    _loadWhatsAppStatus();
-  }
-
-  Future<void> _loadWhatsAppStatus() async {
-    try {
-      final row = await Supabase.instance.client
-          .from('tenant_integrations')
-          .select('status')
-          .eq('tenant_id', widget.tenantId)
-          .eq('provider', 'whatsapp')
-          .maybeSingle();
-      if (mounted) {
-        setState(() => _whatsappStatus = row?['status'] as String?);
-      }
-    } on PostgrestException {
-      // Non-blocking: the card simply keeps its default "not configured" state.
-    }
-  }
-
-  Future<void> _loadApiIntegrations() async {
-    try {
-      final rows = await Supabase.instance.client
-          .from('tenant_api_integrations')
-          .select(
-            'id, name, base_url, auth_type, enabled, tenant_api_resources(id, name, path, http_method, enabled)',
-          )
-          .eq('tenant_id', widget.tenantId)
-          .order('name');
-      if (mounted) {
-        setState(() {
-          _apiIntegrations = (rows as List)
-              .map((row) => Map<String, dynamic>.from(row as Map))
-              .toList();
-          _resourcesByIntegration = {
-            for (final integration in _apiIntegrations)
-              integration['id'] as String:
-                  ((integration['tenant_api_resources'] as List?) ?? const [])
-                      .map(
-                        (resource) => Map<String, dynamic>.from(
-                          resource as Map,
-                        ),
-                      )
-                      .toList(),
-          };
-          _loading = false;
-        });
-      }
-    } on PostgrestException catch (error) {
-      if (mounted) {
-        setState(() {
-          _message = error.message;
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  String _authTypeLabel(String authType) {
-    switch (authType) {
-      case 'api_key':
-        return 'API Key';
-      case 'bearer_token':
-        return 'Bearer Token';
-      case 'basic':
-        return 'Usuario y contraseña';
-      default:
-        return 'Sin autenticación';
-    }
-  }
-
-  Future<void> _openIntegrationDialog({Map<String, dynamic>? integration}) async {
-    final isEditing = integration != null;
-    final nameController = TextEditingController(
-      text: integration?['name'] as String? ?? '',
-    );
-    final urlController = TextEditingController(
-      text: integration?['base_url'] as String? ?? '',
-    );
-    final headerNameController = TextEditingController(text: 'X-API-Key');
-    final headerValueController = TextEditingController();
-    final tokenController = TextEditingController();
-    final usernameController = TextEditingController();
-    final passwordController = TextEditingController();
-    String authType = integration?['auth_type'] as String? ?? 'none';
-    String? dialogError;
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: Text(isEditing ? 'Editar API interna' : 'Agregar API interna'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nombre',
-                      hintText: 'Calendario corporativo',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: urlController,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: 'URL base (https://)',
-                      hintText: 'https://intranet.empresa.com/api',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: authType,
-                    decoration: const InputDecoration(
-                      labelText: 'Autenticación',
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'none',
-                        child: Text('Sin autenticación'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'api_key',
-                        child: Text('API Key (header)'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'bearer_token',
-                        child: Text('Bearer Token'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'basic',
-                        child: Text('Usuario y contraseña (Basic Auth)'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setDialogState(() => authType = value);
-                      }
-                    },
-                  ),
-                  if (isEditing) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Deja los campos de credenciales en blanco para mantener el valor actual.',
-                      style: Theme.of(dialogContext).textTheme.bodySmall,
-                    ),
-                  ],
-                  if (authType == 'api_key') ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: headerNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre del header',
-                        hintText: 'X-API-Key',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: headerValueController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Valor de la API Key',
-                      ),
-                    ),
-                  ],
-                  if (authType == 'bearer_token') ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: tokenController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Token'),
-                    ),
-                  ],
-                  if (authType == 'basic') ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Usuario',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Contraseña',
-                      ),
-                    ),
-                  ],
-                  if (dialogError != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      dialogError!,
-                      style: TextStyle(
-                        color: Theme.of(dialogContext).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final name = nameController.text.trim();
-                final baseUrl = urlController.text.trim();
-                if (name.isEmpty || baseUrl.isEmpty) {
-                  setDialogState(
-                    () => dialogError = 'Nombre y URL base son obligatorios.',
-                  );
-                  return;
-                }
-                if (!baseUrl.startsWith('https://')) {
-                  setDialogState(
-                    () => dialogError = 'La URL base debe iniciar con https://',
-                  );
-                  return;
-                }
-                Navigator.pop(dialogContext, true);
-              },
-              child: const Text('Guardar'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (result != true) {
-      for (final controller in [
-        nameController,
-        urlController,
-        headerNameController,
-        headerValueController,
-        tokenController,
-        usernameController,
-        passwordController,
-      ]) {
-        controller.dispose();
-      }
-      return;
-    }
-
-    Map<String, dynamic> authConfig;
-    switch (authType) {
-      case 'api_key':
-        authConfig = {
-          'header_name': headerNameController.text.trim(),
-          'header_value': headerValueController.text,
-        };
-        break;
-      case 'bearer_token':
-        authConfig = {'token': tokenController.text};
-        break;
-      case 'basic':
-        authConfig = {
-          'username': usernameController.text,
-          'password': passwordController.text,
-        };
-        break;
-      default:
-        authConfig = {};
-    }
-    final name = nameController.text.trim();
-    final baseUrl = urlController.text.trim();
-    for (final controller in [
-      nameController,
-      urlController,
-      headerNameController,
-      headerValueController,
-      tokenController,
-      usernameController,
-      passwordController,
-    ]) {
-      controller.dispose();
-    }
-
-    setState(() => _message = null);
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'manage-internal-api',
-        body: {
-          'action': 'upsert_integration',
-          'tenant_id': widget.tenantId,
-          if (isEditing) 'integration_id': integration['id'],
-          'name': name,
-          'base_url': baseUrl,
-          'auth_type': authType,
-          'auth_config': authConfig,
-        },
-      );
-      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
-      if (data['ok'] != true) {
-        if (mounted) {
-          setState(
-            () => _message = data['error'] as String? ?? 'No fue posible guardar la API.',
-          );
-        }
-        return;
-      }
-      await _loadApiIntegrations();
-      if (mounted) {
-        setState(
-          () => _message = isEditing
-              ? 'Integración actualizada correctamente.'
-              : 'Integración creada correctamente.',
-        );
-      }
-    } on FunctionException catch (error) {
-      if (mounted) {
-        final details = error.details;
-        final errorMessage = details is Map ? details['error'] : null;
-        setState(
-          () => _message =
-              'No fue posible guardar la API: ${errorMessage ?? error.reasonPhrase}',
-        );
-      }
-    }
-  }
-
-  Future<void> _deleteIntegration(String id) async {
-    try {
-      await Supabase.instance.client
-          .from('tenant_api_integrations')
-          .delete()
-          .eq('id', id)
-          .eq('tenant_id', widget.tenantId);
-      await _loadApiIntegrations();
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _message = error.message);
-    }
-  }
-
-  Future<void> _testConnection(String integrationId) async {
-    setState(() {
-      _busyIntegrationId = integrationId;
-      _message = null;
-    });
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'manage-internal-api',
-        body: {
-          'action': 'test_connection',
-          'tenant_id': widget.tenantId,
-          'integration_id': integrationId,
-        },
-      );
-      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
-      if (mounted) {
-        setState(
-          () => _message = data['message'] as String? ??
-              (data['ok'] == true ? 'Conexión exitosa.' : 'No fue posible conectar.'),
-        );
-      }
-    } on FunctionException catch (error) {
-      if (mounted) {
-        final details = error.details;
-        final errorMessage = details is Map ? details['error'] : null;
-        setState(
-          () => _message =
-              'No fue posible probar la conexión: ${errorMessage ?? error.reasonPhrase}',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busyIntegrationId = null);
-    }
-  }
-
-  Future<void> _addResource(String integrationId) async {
-    final nameController = TextEditingController();
-    final pathController = TextEditingController();
-    String method = 'GET';
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Agregar recurso API'),
-          content: SizedBox(
-            width: 430,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre',
-                    hintText: 'Citas',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: pathController,
-                  decoration: const InputDecoration(
-                    labelText: 'Ruta',
-                    hintText: '/appointments',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: method,
-                  decoration: const InputDecoration(labelText: 'Método HTTP'),
-                  items: const ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(value),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) setDialogState(() => method = value);
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Guardar'),
-            ),
-          ],
-        ),
-      ),
-    );
-    final name = nameController.text.trim();
-    final path = pathController.text.trim();
-    nameController.dispose();
-    pathController.dispose();
-    if (result != true || name.isEmpty || path.isEmpty) return;
-    try {
-      await Supabase.instance.client.from('tenant_api_resources').insert({
-        'tenant_id': widget.tenantId,
-        'integration_id': integrationId,
-        'name': name,
-        'path': path.startsWith('/') ? path : '/$path',
-        'http_method': method,
-      });
-      await _loadApiIntegrations();
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _message = error.message);
-    }
-  }
-
-  Future<void> _deleteResource(String id) async {
-    try {
-      await Supabase.instance.client
-          .from('tenant_api_resources')
-          .delete()
-          .eq('id', id)
-          .eq('tenant_id', widget.tenantId);
-      await _loadApiIntegrations();
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _message = error.message);
-    }
-  }
-
-  Future<void> _executeResource({
-    required String integrationId,
-    required Map<String, dynamic> resource,
-  }) async {
-    final method = resource['http_method'] as String;
-    final needsBody = ['POST', 'PUT', 'PATCH'].contains(method);
-    final queryController = TextEditingController();
-    final bodyController = TextEditingController();
-    final proceed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Ejecutar ${resource['name']} ($method)'),
-        content: SizedBox(
-          width: 460,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Parámetros de consulta opcionales, en formato JSON.',
-                style: Theme.of(dialogContext).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: queryController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Query params (JSON)',
-                  hintText: '{"desde": "2026-01-01"}',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              if (needsBody) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bodyController,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Cuerpo (JSON)',
-                    hintText: '{"titulo": "Cita de seguimiento"}',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Ejecutar'),
-          ),
-        ],
-      ),
-    );
-    if (proceed != true) {
-      queryController.dispose();
-      bodyController.dispose();
-      return;
-    }
-
-    Map<String, dynamic> query = {};
-    Map<String, dynamic>? bodyPayload;
-    try {
-      if (queryController.text.trim().isNotEmpty) {
-        query = Map<String, dynamic>.from(
-          jsonDecode(queryController.text.trim()) as Map,
-        );
-      }
-      if (needsBody && bodyController.text.trim().isNotEmpty) {
-        bodyPayload = Map<String, dynamic>.from(
-          jsonDecode(bodyController.text.trim()) as Map,
-        );
-      }
-    } catch (_) {
-      queryController.dispose();
-      bodyController.dispose();
-      if (mounted) {
-        setState(() => _message = 'El JSON ingresado no es válido.');
-      }
-      return;
-    }
-    queryController.dispose();
-    bodyController.dispose();
-
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'manage-internal-api',
-        body: {
-          'action': 'execute_resource',
-          'tenant_id': widget.tenantId,
-          'integration_id': integrationId,
-          'resource_id': resource['id'],
-          'query': query,
-          'body': ?bodyPayload,
-        },
-      );
-      final data = Map<String, dynamic>.from((response.data as Map?) ?? const {});
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (resultContext) => AlertDialog(
-          title: Text(
-            data['ok'] == true
-                ? 'Respuesta exitosa (${data['status_code']})'
-                : 'Respuesta con error (${data['status_code'] ?? '-'})',
-          ),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Text(
-                (data['response_preview'] as String?) ??
-                    (data['message'] as String?) ??
-                    'Sin respuesta.',
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(resultContext),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
-    } on FunctionException catch (error) {
-      if (mounted) {
-        final details = error.details;
-        final errorMessage = details is Map ? details['error'] : null;
-        setState(
-          () => _message =
-              'No fue posible ejecutar el recurso: ${errorMessage ?? error.reasonPhrase}',
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final integrations = [
-      (
-        'WhatsApp Business',
-        'Mensajería y atención por WhatsApp Cloud API.',
-        Icons.chat_outlined,
-        _integrationStatusLabel(_whatsappStatus ?? 'not_configured'),
-        widget.onOpenWhatsAppTab,
-      ),
-      (
-        'Microsoft 365',
-        'Calendarios, usuarios y servicios de Microsoft.',
-        Icons.business_center_outlined,
-        'Próximamente',
-        () => _showComingSoonDialog(
-          'Microsoft 365',
-          'La conexión OAuth con Microsoft 365 (calendarios, correo y Teams) está en el roadmap técnico. Mientras tanto puedes registrar cualquier API interna de tu compañía en la sección de abajo.',
-        ),
-      ),
-      (
-        'Google Workspace',
-        'Calendario, contactos y servicios de Google.',
-        Icons.public,
-        'Próximamente',
-        () => _showComingSoonDialog(
-          'Google Workspace',
-          'La conexión OAuth con Google Workspace (Calendar, Contacts) está en el roadmap técnico. Mientras tanto puedes registrar cualquier API interna de tu compañía en la sección de abajo.',
-        ),
-      ),
-      (
-        'API privada',
-        'Conecta una plataforma propia mediante API y webhooks.',
-        Icons.api_outlined,
-        _apiIntegrations.isEmpty ? 'No configurada' : 'Configurada',
-        () => _openIntegrationDialog(),
-      ),
-    ];
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text('Integraciones', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        const Text(
-          'Conecta servicios externos de forma independiente para este tenant.',
-        ),
-        const SizedBox(height: 20),
-        ...integrations.map(
-          (integration) => Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              leading: Icon(integration.$3),
-              title: Text(integration.$1),
-              subtitle: Text(integration.$2),
-              trailing: TextButton(
-                onPressed: integration.$5,
-                child: Chip(label: Text(integration.$4)),
-              ),
-              onTap: integration.$5,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'APIs internas de la compañía',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            FilledButton.icon(
-              onPressed: () => _openIntegrationDialog(),
-              icon: const Icon(Icons.add),
-              label: const Text('Agregar API'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (_message != null)
-          Text(
-            _message!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        if (_loading)
-          const Center(child: CircularProgressIndicator())
-        else if (_apiIntegrations.isEmpty)
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.api_outlined),
-              title: Text('No hay APIs internas configuradas'),
-              subtitle: Text(
-                'Agrega la API del calendario, ERP, CRM u otra aplicación interna.',
-              ),
-            ),
-          )
-        else
-          ..._apiIntegrations.map(
-            (integration) => Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.api_outlined),
-                    title: Text(integration['name'] as String),
-                    subtitle: Text(
-                      '${integration['base_url']} · Autenticación: '
-                      '${_authTypeLabel(integration['auth_type'] as String? ?? 'none')}',
-                    ),
-                    trailing: Wrap(
-                      spacing: 4,
-                      children: [
-                        _busyIntegrationId == integration['id']
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 8),
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              )
-                            : IconButton(
-                                tooltip: 'Probar conexión',
-                                onPressed: () =>
-                                    _testConnection(integration['id'] as String),
-                                icon: const Icon(Icons.wifi_tethering),
-                              ),
-                        IconButton(
-                          tooltip: 'Editar',
-                          onPressed: () => _openIntegrationDialog(
-                            integration: integration,
-                          ),
-                          icon: const Icon(Icons.edit_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Agregar recurso',
-                          onPressed: () =>
-                              _addResource(integration['id'] as String),
-                          icon: const Icon(Icons.route_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Eliminar integración',
-                          onPressed: () =>
-                              _deleteIntegration(integration['id'] as String),
-                          icon: const Icon(Icons.delete_outline),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if ((_resourcesByIntegration[integration['id'] as String] ??
-                          [])
-                      .isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: 16,
-                        right: 8,
-                        bottom: 8,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Divider(height: 1),
-                          for (final resource
-                              in _resourcesByIntegration[integration['id']
-                                      as String] ??
-                                  [])
-                            ListTile(
-                              dense: true,
-                              title: Text(resource['name'] as String),
-                              subtitle: Text(
-                                '${resource['http_method']} ${resource['path']}',
-                              ),
-                              trailing: Wrap(
-                                spacing: 4,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Ejecutar',
-                                    onPressed: () => _executeResource(
-                                      integrationId: integration['id'] as String,
-                                      resource: resource,
-                                    ),
-                                    icon: const Icon(Icons.play_arrow_outlined),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Eliminar recurso',
-                                    onPressed: () =>
-                                        _deleteResource(resource['id'] as String),
-                                    icon: const Icon(Icons.delete_outline),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  void _showComingSoonDialog(String title, String message) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Entendido'),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -5129,7 +4284,7 @@ class _WhatsAppSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 6,
+      length: 4,
       child: Column(
         children: [
           Material(
@@ -5139,10 +4294,8 @@ class _WhatsAppSettings extends StatelessWidget {
               tabs: [
                 Tab(text: 'Integración'),
                 Tab(text: 'Plantillas'),
-                Tab(text: 'Bienvenida'),
-                Tab(text: 'Flujo de mensajes'),
+                Tab(text: 'Respuestas automáticas'),
                 Tab(text: 'SLA'),
-                Tab(text: 'Automatizaciones'),
               ],
             ),
           ),
@@ -5151,15 +4304,8 @@ class _WhatsAppSettings extends StatelessWidget {
               children: [
                 _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId),
                 WhatsAppTemplatesPanel(key: ValueKey('templates-$tenantId'), tenantId: tenantId),
-                _WhatsAppWelcomeSettings(tenantId: tenantId),
-                _WhatsAppFlowSettings(tenantId: tenantId),
+                BotSettingsPanel(key: ValueKey('bots-$tenantId'), tenantId: tenantId),
                 _WhatsAppSlaSettings(tenantId: tenantId),
-                _WhatsAppSettingPanel(
-                  icon: Icons.auto_awesome_outlined,
-                  title: 'Automatizaciones',
-                  description: 'Administra reglas para responder, etiquetar, asignar o notificar cuando ocurra un evento en WhatsApp.',
-                  actionLabel: 'Crear automatización',
-                ),
               ],
             ),
           ),
@@ -5186,7 +4332,6 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   final _nameController = TextEditingController();
   bool _loading = true;
   bool _saving = false;
-  bool _validating = false;
   bool _sdkReady = false;
   String? _configId;
   String? _setupError;
@@ -5196,7 +4341,6 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   String? _historyError;
   String _status = 'not_configured';
   String? _message;
-  List<Map<String, dynamic>> _blockedEntities = [];
 
   @override
   void initState() {
@@ -5214,6 +4358,22 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _sdkReady = false;
+      _setupError = null;
+      _message = null;
+      _status = 'not_configured';
+      _onboardingMode = 'cloud_api';
+      _businessIdController.clear();
+      _phoneIdController.clear();
+      _phoneController.clear();
+      _nameController.clear();
+      _historyStatus = 'not_requested';
+      _historyProgress = 0;
+      _historyError = null;
+    });
     try {
       final row = await Supabase.instance.client
           .from('tenant_integrations')
@@ -5245,8 +4405,8 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           _historyError = account['history_sync_error'] as String?;
         }
       }
-    } on PostgrestException catch (error) {
-      _message = error.message;
+    } on PostgrestException {
+      _message = 'No se pudo consultar la conexión. Actualiza el estado o contacta con soporte.';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -5268,14 +4428,16 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           _setupError = null;
         });
       }
-    } on FunctionException catch (error) {
+    } on FunctionException {
       if (mounted) {
-        final details = error.details;
         setState(() => _setupError =
-            details is Map ? details['error']?.toString() : error.reasonPhrase);
+            'No se pudo preparar la conexión. Actualiza el estado o contacta con soporte.');
       }
-    } catch (error) {
-      if (mounted) setState(() => _setupError = 'No se pudo preparar Meta: $error');
+    } catch (_) {
+      if (mounted) {
+        setState(() => _setupError =
+            'No se pudo abrir la conexión con Meta. Revisa el navegador y vuelve a intentarlo.');
+      }
     }
   }
 
@@ -5316,44 +4478,6 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
     }
   }
 
-  Future<void> _validateConnection() async {
-    setState(() {
-      _validating = true;
-      _message = null;
-      _blockedEntities = [];
-    });
-    try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'validate-whatsapp-integration',
-        body: {'tenant_id': widget.tenantId},
-      );
-      final data = Map<String, dynamic>.from(
-        (response.data as Map?) ?? const {},
-      );
-      final blocked = (data['blocked_entities'] as List?) ?? const [];
-      if (mounted) {
-        setState(() {
-          _status = data['status'] as String? ?? 'error';
-          _message =
-              data['message'] as String? ??
-              'La validación terminó sin un mensaje.';
-          _blockedEntities = blocked
-              .map((entry) => Map<String, dynamic>.from(entry as Map))
-              .toList();
-        });
-      }
-    } on FunctionException catch (error) {
-      if (mounted) {
-        setState(
-          () => _message =
-              'No fue posible validar la conexión: ${error.details ?? error.reasonPhrase}',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _validating = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -5369,34 +4493,24 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           statusLabel: _integrationStatusLabel(_status),
         ),
         const SizedBox(height: 24),
-        if (hasIntegration && _onboardingMode != 'coexistence')
-          ExpansionTile(
-            title: const Text('Conexión anterior: datos de diagnóstico'),
-            children: [
-              _WhatsAppIntegrationSummary(
-                configured: true,
-                businessAccountId: _businessIdController.text,
-                phoneNumberId: _phoneIdController.text,
-                phoneNumber: _phoneController.text,
-                channelName: _nameController.text,
-              ),
-            ],
-          )
-        else
-          _WhatsAppIntegrationSummary(
-            configured: hasIntegration,
-            businessAccountId: _businessIdController.text,
-            phoneNumberId: _phoneIdController.text,
-            phoneNumber: _phoneController.text,
-            channelName: _nameController.text,
+        if (hasIntegration && _onboardingMode == 'coexistence')
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.phone_android),
+              title: Text(_phoneController.text.isEmpty
+                  ? 'WhatsApp de tu empresa'
+                  : _phoneController.text),
+              subtitle: Text(_nameController.text.isEmpty
+                  ? 'Cuenta autorizada por tu empresa'
+                  : _nameController.text),
+            ),
           ),
         const SizedBox(height: 12),
         if (hasIntegration && _onboardingMode != 'coexistence')
           const Text(
-            'Esta conexión anterior no confirma coexistencia. Para usar el número '
-            'del celular y la plataforma, pulsa Conectar WhatsApp Business y '
-            'autoriza la cuenta existente. Meta exige los permisos avanzados '
-            'aprobados. No elimines ni registres de nuevo el número como prueba.',
+            'Hay una conexión anterior pendiente de actualizar. Pulsa Conectar '
+            'WhatsApp Business para autorizar el número de tu empresa. Si no puedes '
+            'completar el proceso, contacta con soporte. No elimines el número.',
           ),
         const SizedBox(height: 12),
         const Text(
@@ -5423,16 +4537,7 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
               label: Text(_saving ? 'Conectando...' : 'Conectar WhatsApp Business'),
             ),
             OutlinedButton.icon(
-              onPressed: _validating || _saving || !hasIntegration
-                  ? null
-                  : _validateConnection,
-              icon: const Icon(Icons.verified_outlined),
-              label: Text(
-                _validating ? 'Validando...' : 'Validar conexión con Meta',
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: _saving ? null : _load,
+              onPressed: _saving || _loading ? null : _load,
               icon: const Icon(Icons.refresh),
               label: const Text('Actualizar estado'),
             ),
@@ -5443,7 +4548,8 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           Text('Historial: ${_historyStatusLabel(_historyStatus)} ($_historyProgress%)'),
           if (_historyStatus == 'pending' || _historyStatus == 'syncing')
             LinearProgressIndicator(value: _historyProgress / 100),
-          if (_historyError != null) Text(_historyError!),
+          if (_historyError != null)
+            const Text('No se pudo completar la importación. Contacta con soporte.'),
           const Text(
             'Actualizar estado consulta el progreso; no repite la solicitud '
             'de importación. Coexistencia no elimina restricciones de Meta ni '
@@ -5451,41 +4557,6 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ],
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
-        if (_blockedEntities.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Meta reporta restricciones en:',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Colors.red.shade700,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                for (final entity in _blockedEntities)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '• ${entity['entity_type'] ?? entity['entity'] ?? 'Desconocido'}: '
-                      '${entity['can_send_message'] ?? 'N/D'}'
-                      '${entity['additional_info'] != null ? ' — ${entity['additional_info']}' : ''}'
-                      '${entity['messaging_errors'] != null ? ' — ${entity['messaging_errors']}' : ''}',
-                      style: const TextStyle(color: Colors.black87),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -5501,87 +4572,6 @@ String _historyStatusLabel(String status) => switch (status) {
   _ => status,
 };
 
-class _WhatsAppIntegrationSummary extends StatelessWidget {
-  const _WhatsAppIntegrationSummary({
-    required this.configured,
-    required this.businessAccountId,
-    required this.phoneNumberId,
-    required this.phoneNumber,
-    required this.channelName,
-  });
-
-  final bool configured;
-  final String businessAccountId;
-  final String phoneNumberId;
-  final String phoneNumber;
-  final String channelName;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!configured) {
-      return const Card(
-        child: ListTile(
-          leading: Icon(Icons.link_off_outlined),
-          title: Text('Cuenta de Meta no conectada'),
-          subtitle: Text('Pulsa Conectar WhatsApp Business para autorizar la coexistencia.'),
-        ),
-      );
-    }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _IntegrationSummaryRow(
-              label: 'Cuenta empresarial',
-              value: businessAccountId,
-            ),
-            _IntegrationSummaryRow(
-              label: 'Phone Number ID',
-              value: phoneNumberId,
-            ),
-            _IntegrationSummaryRow(
-              label: 'Número',
-              value: phoneNumber.isEmpty ? 'No registrado' : phoneNumber,
-            ),
-            _IntegrationSummaryRow(
-              label: 'Canal',
-              value: channelName.isEmpty ? 'Sin nombre' : channelName,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _IntegrationSummaryRow extends StatelessWidget {
-  const _IntegrationSummaryRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(child: Text(value)),
-        ],
-      ),
-    );
-  }
-}
-
 String _integrationStatusLabel(String status) {
   switch (status) {
     case 'active':
@@ -5590,164 +4580,12 @@ String _integrationStatusLabel(String status) {
       return 'Pendiente de validación';
     case 'error':
       return 'Con error';
+    case 'restricted':
+      return 'Con restricciones';
     case 'disabled':
       return 'Deshabilitada';
     default:
       return 'No configurada';
-  }
-}
-
-class _WhatsAppWelcomeSettings extends StatefulWidget {
-  const _WhatsAppWelcomeSettings({required this.tenantId});
-
-  final String tenantId;
-
-  @override
-  State<_WhatsAppWelcomeSettings> createState() =>
-      _WhatsAppWelcomeSettingsState();
-}
-
-class _WhatsAppWelcomeSettingsState extends State<_WhatsAppWelcomeSettings> {
-  final _messageController = TextEditingController();
-  final _messagesScrollController = ScrollController();
-  bool _enabled = false;
-  bool _loading = true;
-  bool _saving = false;
-  bool _editing = false;
-  String? _feedback;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _messageController.dispose();
-    _messagesScrollController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final row = await Supabase.instance.client
-          .from('tenant_integrations')
-          .select('metadata')
-          .eq('tenant_id', widget.tenantId)
-          .eq('provider', 'whatsapp_welcome')
-          .maybeSingle();
-      final metadata = Map<String, dynamic>.from(
-        (row?['metadata'] as Map?) ?? const {},
-      );
-      _enabled = metadata['enabled'] as bool? ?? false;
-      _messageController.text = metadata['message'] as String? ?? '';
-    } on PostgrestException catch (error) {
-      _feedback = error.message;
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _save() async {
-    if (_messageController.text.trim().isEmpty) {
-      setState(() => _feedback = 'Escribe el mensaje de bienvenida.');
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _feedback = null;
-    });
-    try {
-      await Supabase.instance.client.from('tenant_integrations').upsert({
-        'tenant_id': widget.tenantId,
-        'provider': 'whatsapp_welcome',
-        'status': _enabled ? 'active' : 'disabled',
-        'metadata': {
-          'enabled': _enabled,
-          'message': _messageController.text.trim(),
-        },
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'tenant_id,provider');
-      if (mounted) {
-        setState(() {
-          _editing = false;
-          _feedback = 'Mensaje de bienvenida guardado.';
-        });
-      }
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _feedback = error.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    final readOnly = !_editing;
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.waving_hand_outlined,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Mensaje de bienvenida',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: _saving ? null : () => setState(() => _editing = true),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Editar'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Configura el mensaje inicial que recibirá un contacto cuando escriba al canal.',
-        ),
-        const SizedBox(height: 20),
-        SwitchListTile(
-          value: _enabled,
-          onChanged: readOnly
-              ? null
-              : (value) => setState(() => _enabled = value),
-          title: const Text('Activar mensaje de bienvenida'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _messageController,
-          readOnly: readOnly,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            labelText: 'Mensaje',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: _saving || readOnly ? null : _save,
-          icon: const Icon(Icons.save_outlined),
-          label: Text(_saving ? 'Guardando...' : 'Guardar bienvenida'),
-        ),
-        if (!readOnly)
-          TextButton(
-            onPressed: _saving ? null : () => setState(() => _editing = false),
-            child: const Text('Cancelar'),
-          ),
-        if (_feedback != null) ...[
-          const SizedBox(height: 10),
-          Text(_feedback!),
-        ],
-      ],
-    );
   }
 }
 
@@ -6122,379 +4960,6 @@ class _SlaNumberField extends StatelessWidget {
   }
 }
 
-class _WhatsAppFlowSettings extends StatefulWidget {
-  const _WhatsAppFlowSettings({required this.tenantId});
-
-  final String tenantId;
-
-  @override
-  State<_WhatsAppFlowSettings> createState() => _WhatsAppFlowSettingsState();
-}
-
-class _WhatsAppFlowSettingsState extends State<_WhatsAppFlowSettings> {
-  final _nameController = TextEditingController();
-  final _initialMessageController = TextEditingController();
-  final List<_WhatsAppFlowOption> _options = [];
-  bool _loading = true;
-  bool _saving = false;
-  bool _editing = false;
-  bool _active = false;
-  String? _feedback;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _initialMessageController.dispose();
-    for (final option in _options) {
-      option.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final row = await Supabase.instance.client
-          .from('tenant_integrations')
-          .select('status, metadata')
-          .eq('tenant_id', widget.tenantId)
-          .eq('provider', 'whatsapp_flow')
-          .maybeSingle();
-      if (row != null) {
-        final metadata = Map<String, dynamic>.from(
-          (row['metadata'] as Map?) ?? const {},
-        );
-        _active = row['status'] == 'active';
-        _nameController.text = metadata['name'] as String? ?? '';
-        _initialMessageController.text =
-            metadata['initial_message'] as String? ?? '';
-        final savedOptions = metadata['options'] as List? ?? const [];
-        for (final saved in savedOptions) {
-          final option = Map<String, dynamic>.from(saved as Map);
-          _options.add(
-            _WhatsAppFlowOption(
-              label: option['label'] as String? ?? '',
-              response: option['response'] as String? ?? '',
-              handoff: option['handoff'] as bool? ?? false,
-            ),
-          );
-        }
-      }
-    } on PostgrestException catch (error) {
-      _feedback = error.message;
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _save() async {
-    if (_nameController.text.trim().isEmpty ||
-        _initialMessageController.text.trim().isEmpty ||
-        _options.isEmpty ||
-        _options.any((option) => option.label.text.trim().isEmpty)) {
-      setState(
-        () => _feedback =
-            'Completa el nombre, el mensaje inicial y al menos una opción.',
-      );
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _feedback = null;
-    });
-    try {
-      await Supabase.instance.client.from('tenant_integrations').upsert({
-        'tenant_id': widget.tenantId,
-        'provider': 'whatsapp_flow',
-        'status': _active ? 'active' : 'disabled',
-        'metadata': {
-          'name': _nameController.text.trim(),
-          'initial_message': _initialMessageController.text.trim(),
-          'options': _options
-              .map(
-                (option) => {
-                  'label': option.label.text.trim(),
-                  'response': option.response.text.trim(),
-                  'handoff': option.handoff,
-                },
-              )
-              .toList(),
-        },
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'tenant_id,provider');
-      if (mounted) {
-        setState(() {
-          _editing = false;
-          _feedback = 'Flujo guardado correctamente.';
-        });
-      }
-    } on PostgrestException catch (error) {
-      if (mounted) setState(() => _feedback = error.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  void _addOption() {
-    setState(() {
-      _options.add(_WhatsAppFlowOption());
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    final readOnly = !_editing;
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.account_tree_outlined,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Flujo de mensajes',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            Chip(label: Text(_active ? 'Activo' : 'Inactivo')),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _saving ? null : () => setState(() => _editing = true),
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Editar'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Diseña el recorrido inicial de atención y define cuándo una opción debe pasar a un agente.',
-        ),
-        const SizedBox(height: 20),
-        TextField(
-          controller: _nameController,
-          readOnly: readOnly,
-          decoration: const InputDecoration(
-            labelText: 'Nombre del flujo',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 14),
-        SwitchListTile(
-          value: _active,
-          onChanged: readOnly
-              ? null
-              : (value) => setState(() => _active = value),
-          title: const Text('Activar flujo'),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _initialMessageController,
-          readOnly: readOnly,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'Mensaje inicial',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Opciones del menú',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            if (!readOnly)
-              OutlinedButton.icon(
-                onPressed: _addOption,
-                icon: const Icon(Icons.add),
-                label: const Text('Agregar opción'),
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (_options.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Aún no hay opciones configuradas. Pulsa Editar para crear la primera.',
-              ),
-            ),
-          ),
-        for (var index = 0; index < _options.length; index++)
-          _WhatsAppFlowOptionEditor(
-            option: _options[index],
-            index: index,
-            readOnly: readOnly,
-            onRemove: () => setState(() => _options.removeAt(index).dispose()),
-          ),
-        if (!readOnly) ...[
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: Text(_saving ? 'Guardando...' : 'Guardar flujo'),
-          ),
-          TextButton(
-            onPressed: _saving ? null : () => setState(() => _editing = false),
-            child: const Text('Cancelar'),
-          ),
-        ],
-        if (_feedback != null) ...[
-          const SizedBox(height: 10),
-          Text(_feedback!),
-        ],
-      ],
-    );
-  }
-}
-
-class _WhatsAppFlowOption {
-  _WhatsAppFlowOption({
-    String label = '',
-    String response = '',
-    this.handoff = false,
-  }) : label = TextEditingController(text: label),
-       response = TextEditingController(text: response);
-
-  final TextEditingController label;
-  final TextEditingController response;
-  bool handoff;
-
-  void dispose() {
-    label.dispose();
-    response.dispose();
-  }
-}
-
-class _WhatsAppFlowOptionEditor extends StatefulWidget {
-  const _WhatsAppFlowOptionEditor({
-    required this.option,
-    required this.index,
-    required this.readOnly,
-    required this.onRemove,
-  });
-
-  final _WhatsAppFlowOption option;
-  final int index;
-  final bool readOnly;
-  final VoidCallback onRemove;
-
-  @override
-  State<_WhatsAppFlowOptionEditor> createState() =>
-      _WhatsAppFlowOptionEditorState();
-}
-
-class _WhatsAppFlowOptionEditorState extends State<_WhatsAppFlowOptionEditor> {
-  @override
-  Widget build(BuildContext context) {
-    final option = widget.option;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Text('Opción ${widget.index + 1}'),
-                const Spacer(),
-                if (!widget.readOnly)
-                  IconButton(
-                    tooltip: 'Eliminar opción',
-                    onPressed: widget.onRemove,
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-              ],
-            ),
-            TextField(
-              controller: option.label,
-              readOnly: widget.readOnly,
-              decoration: const InputDecoration(
-                labelText: 'Texto de la opción',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: option.response,
-              readOnly: widget.readOnly,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Respuesta automática',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            SwitchListTile(
-              value: option.handoff,
-              onChanged: widget.readOnly
-                  ? null
-                  : (value) => setState(() => option.handoff = value),
-              title: const Text('Derivar esta opción a un agente'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WhatsAppSettingPanel extends StatelessWidget {
-  const _WhatsAppSettingPanel({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.actionLabel,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final String actionLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Icon(icon, size: 32, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(height: 12),
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        Text(description),
-        const SizedBox(height: 24),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Esta configuración aún no está creada para este tenant.',
-                  ),
-                ),
-                OutlinedButton(onPressed: null, child: Text(actionLabel)),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _PersonalSettings extends StatelessWidget {
   const _PersonalSettings({
     required this.nameController,
@@ -6753,6 +5218,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   String? _selectedConversationId;
   bool _loading = true;
   bool _loadingMessages = false;
+  bool _mobileChatOpen = false;
   bool _sending = false;
   String? _error;
   RealtimeChannel? _realtimeChannel;
@@ -6947,6 +5413,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final showProfile = constraints.maxWidth >= 1050;
+        final compact = constraints.maxWidth < 650;
         return Card(
           margin: const EdgeInsets.only(bottom: 24),
           clipBehavior: Clip.antiAlias,
@@ -6954,6 +5421,8 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
             height: (MediaQuery.sizeOf(context).height - 250).clamp(460.0, 760.0),
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
+                : compact
+                ? (_mobileChatOpen ? _conversationPanel(theme, compact: true) : _conversationList(theme))
                 : Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -7004,7 +5473,11 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                       selected: conversation['id'] == _selectedConversationId,
                       selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
                       onTap: () async {
-                        setState(() => _selectedConversationId = conversation['id'] as String);
+                        setState(() {
+                          _selectedConversationId = conversation['id'] as String;
+                          _mobileChatOpen = true;
+                          _messages = [];
+                        });
                         await _loadMessages();
                       },
                       leading: CircleAvatar(backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase())),
@@ -7019,7 +5492,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     );
   }
 
-  Widget _conversationPanel(ThemeData theme) {
+  Widget _conversationPanel(ThemeData theme, {bool compact = false}) {
     final conversation = _selectedConversation;
     if (conversation == null) {
       return const Center(child: Text('Selecciona una conversación para comenzar.'));
@@ -7030,12 +5503,21 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
       children: [
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-          leading: CircleAvatar(radius: 18, backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 13))),
+          leading: compact
+              ? BackButton(onPressed: () => setState(() => _mobileChatOpen = false))
+              : CircleAvatar(radius: 18, backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.14), child: Text(name.substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 13))),
           title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           subtitle: Text(contact['phone_number'] as String? ?? 'WhatsApp', style: const TextStyle(fontSize: 12)),
           trailing: IconButton(tooltip: 'Actualizar mensajes', onPressed: _loadMessages, icon: const Icon(Icons.refresh)),
         ),
         const Divider(height: 1),
+        ConversationBotControls(
+          key: ValueKey('bot-$_selectedConversationId'),
+          tenantId: widget.tenantId,
+          conversationId: conversation['id'] as String,
+        ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(8), child: Text(_error!, style: TextStyle(color: theme.colorScheme.error))),
         Expanded(
           child: Container(
             width: double.infinity,

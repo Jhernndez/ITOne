@@ -178,6 +178,7 @@ interface Account {
   business_account_id: string;
   access_token: string | null;
   name: string;
+  display_phone_number?: string | null;
 }
 export interface TemplateDeps {
   authorize(request: Request, tenant: string): Promise<Account[]>;
@@ -220,7 +221,7 @@ export function templatesHandler(deps: TemplateDeps) {
           accounts: accounts.map((a) => ({
             id: a.id,
             name: a.name,
-            waba_id: a.business_account_id,
+            phone_number: a.display_phone_number ?? null,
           })),
         });
       }

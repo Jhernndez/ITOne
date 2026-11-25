@@ -33,6 +33,13 @@ class FlowVersion {
 class FlowRepository {
   FlowRepository(this.client);
   final SupabaseClient client;
+  Future<List<Map<String, dynamic>>> apiResources(String tenantId) => client
+      .from('tenant_api_resources')
+      .select('id,name,http_method')
+      .eq('tenant_id', tenantId)
+      .eq('enabled', true)
+      .eq('enabled_for_automation', true);
+
   Future<List<SavedFlow>> list(String tenantId) async {
     final rows = await client
         .from('automation_flows')

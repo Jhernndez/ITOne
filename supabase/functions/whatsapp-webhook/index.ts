@@ -4,6 +4,7 @@ import {
   historyState, normalizeMessages, object, objects, validSignature,
 } from "../_shared/whatsapp_webhook.ts";
 
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
 Deno.serve(async (request) => {
   if (request.method === "GET") {
     const url = new URL(request.url);
@@ -30,6 +31,7 @@ Deno.serve(async (request) => {
     }
     const payload = object(JSON.parse(raw));
     const client = createClient(url, serviceKey);
+    let hasInbound = false;
     for (const entry of objects(payload.entry)) {
       for (const change of objects(entry.changes)) {
         const value = object(change.value);
@@ -68,6 +70,7 @@ Deno.serve(async (request) => {
           if (error) throw error;
         }
         const messages = normalizeMessages(String(change.field), value);
+        hasInbound ||= messages.some((message) => message.direction === "inbound" && message.source === "cloud_api");
         // Bounded RPC batches avoid a network round-trip per historical message.
         // Commit before acknowledging so Meta retries recover partial ingestion.
         for (let offset = 0; offset < messages.length; offset += 200) {
@@ -92,6 +95,17 @@ Deno.serve(async (request) => {
           if (error) throw error;
         }
       }
+    }
+    const workerSecret = Deno.env.get("WHATSAPP_BOT_WORKER_SECRET");
+    if (workerSecret && hasInbound) {
+      EdgeRuntime.waitUntil(fetch(`${url}/functions/v1/whatsapp-bot-worker`, {
+        method: "POST",
+        headers: { "x-bot-secret": workerSecret },
+        signal: AbortSignal.timeout(55000),
+      }).then(async (response) => {
+        await response.body?.cancel();
+        if (!response.ok) console.error("Bot dispatch failed", { status: response.status });
+      }).catch((error: unknown) => console.error("Bot dispatch failed; cron will recover pending jobs", error)));
     }
     return json({ ok: true });
   } catch (error) {

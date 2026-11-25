@@ -209,7 +209,7 @@ class _WhatsAppTemplatesPanelState extends State<WhatsAppTemplatesPanel> {
                   (a) => DropdownMenuItem(
                     value: a['id'] as String,
                     child: Text(
-                      '${a['name'] ?? 'WhatsApp'} · WABA ${a['waba_id']}',
+                      '${a['name'] ?? 'WhatsApp'}${a['phone_number'] == null ? '' : ' · ${a['phone_number']}'}',
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),

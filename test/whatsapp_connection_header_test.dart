@@ -3,51 +3,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:itone/features/whatsapp/whatsapp_connection_header.dart';
 
 void main() {
-  for (final (mode, expected) in [
-    ('cloud_api', 'WhatsApp · Conexión anterior Cloud API · sin coexistencia'),
-    ('coexistence', 'WhatsApp · Coexistencia'),
-    ('unknown', 'WhatsApp · Modalidad por verificar'),
+  for (final (configured, mode, state) in [
+    (true, 'coexistence', 'Estado de la conexión: Activa'),
+    (true, 'cloud_api', 'Estado de la conexión: requiere autorización'),
+    (true, 'unknown', 'Estado de la conexión: requiere autorización'),
+    (false, 'cloud_api', 'Estado de la conexión: sin conectar'),
   ]) {
-    testWidgets('labels $mode without claiming Meta delivery capability', (
+    testWidgets('tenant header $configured $mode has simple honest status', (
       tester,
     ) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: WhatsAppConnectionHeader(
-              configured: true,
+              configured: configured,
               onboardingMode: mode,
               statusLabel: 'Activa',
             ),
           ),
         ),
       );
-      expect(find.text(expected), findsOneWidget);
-      expect(
-        find.text('Estado de la conexión en ITONE: Activa'),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('no certifica que Meta permita enviar'),
-        findsOneWidget,
-      );
+      expect(find.text(state), findsOneWidget);
+      expect(find.textContaining('no garantiza la entrega'), findsOneWidget);
+      expect(find.textContaining('Cloud API'), findsNothing);
+      expect(find.textContaining('Validar conexión con Meta'), findsNothing);
+      expect(find.textContaining('No necesitas copiar tokens'), findsOneWidget);
+      if (mode != 'coexistence') {
+        expect(find.text('Conectar WhatsApp Business'), findsOneWidget);
+      }
     });
   }
-  testWidgets('unconfigured connection does not claim coexistence', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: WhatsAppConnectionHeader(
-            configured: false,
-            onboardingMode: 'cloud_api',
-            statusLabel: 'Pendiente',
-          ),
-        ),
-      ),
-    );
-    expect(find.text('Conectar WhatsApp Business'), findsOneWidget);
-    expect(find.textContaining('sin coexistencia'), findsNothing);
-  });
 }

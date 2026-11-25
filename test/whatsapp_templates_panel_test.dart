@@ -105,6 +105,7 @@ void main() {
       final repo = _Repository();
       await open(t, repo);
       expect(find.text('solicitud · es'), findsOneWidget);
+      expect(find.textContaining('WABA'), findsNothing);
       await tap(t, 'Crear plantilla');
       await enter(t, 'Nombre (minúsculas, números y _)', 'pedido_actualizado');
       await enter(t, 'Encabezado de texto (opcional)', 'Estado del pedido');
