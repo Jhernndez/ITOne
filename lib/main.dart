@@ -13,6 +13,7 @@ import 'features/external_api/external_api_panel.dart';
 import 'features/whatsapp/whatsapp_connection_header.dart';
 import 'features/whatsapp/platform_whatsapp_settings.dart';
 import 'features/whatsapp/message_image.dart';
+import 'features/whatsapp/message_status.dart';
 import 'features/whatsapp_templates/whatsapp_templates_panel.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -5259,7 +5260,7 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           callback: (_) => _loadConversations(refreshMessages: false),
         )
         .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
+          event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'whatsapp_messages',
           filter: PostgresChangeFilter(
@@ -5267,18 +5268,35 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
             column: 'tenant_id',
             value: widget.tenantId,
           ),
-          callback: (_) async {
-            await _loadConversations(refreshMessages: false);
-            await _loadMessages(showLoading: false);
+          callback: (event) {
+            if (!mounted) return;
+            final deleted = event.eventType == PostgresChangeEvent.delete;
+            final record = deleted ? event.oldRecord : event.newRecord;
+            if (record['conversation_id'] == _selectedConversationId ||
+                (deleted && _messages.any((message) => message['id'] == record['id']))) {
+              final wasNearBottom = !_messagesScrollController.hasClients ||
+                  _messagesScrollController.position.extentAfter < 100;
+              setState(() => _messages = mergeWhatsAppMessage(_messages, record, deleted: deleted));
+              if (!deleted && wasNearBottom) _scrollMessagesToBottom();
+            }
           },
         )
-        .subscribe();
+        .subscribe((status, error) {
+          if (!mounted) return;
+          if (status == RealtimeSubscribeStatus.subscribed) {
+            _loadConversations();
+          } else if (status == RealtimeSubscribeStatus.channelError ||
+              status == RealtimeSubscribeStatus.timedOut) {
+            setState(() => _error = 'La conexión en tiempo real se interrumpió. Actualiza el chat mientras se reconecta.');
+          }
+        });
   }
 
   Future<void> _loadConversations({
     bool preserveSelection = true,
     bool refreshMessages = true,
   }) async {
+    final previousSelection = _selectedConversationId;
     try {
       final rows = await _client
           .from('whatsapp_conversations')
@@ -5301,7 +5319,8 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
               : conversations.first['id'] as String;
         }
       });
-      if (_selectedConversationId != null) {
+      if (_selectedConversationId != null &&
+          (refreshMessages || previousSelection != _selectedConversationId)) {
         await _loadMessages(
           showLoading: refreshMessages && _messages.isEmpty,
         );
@@ -5373,9 +5392,12 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           'message': message,
         },
       );
-      _messageController.clear();
-      await _loadConversations(refreshMessages: false);
-      await _loadMessages(showLoading: false);
+      if (!mounted) return;
+      if (_messageController.text.trim() == message) _messageController.clear();
+      await Future.wait([
+        _loadConversations(refreshMessages: false),
+        _loadMessages(showLoading: false),
+      ]);
       _scrollMessagesToBottom();
     } on FunctionException catch (error) {
       if (mounted) setState(() => _error = error.details?.toString() ?? error.reasonPhrase);
@@ -5562,6 +5584,11 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
                                     ),
                                   if (message['media_id'] == null && message['message_type'] == 'image')
                                     const Text('Archivo no disponible en ITONE; ábrelo desde WhatsApp Business.'),
+                                  WhatsAppMessageStatus(
+                                    timestamp: (message['provider_timestamp'] ?? message['created_at']) as String?,
+                                    outbound: sent,
+                                    status: message['delivery_status'] as String?,
+                                  ),
                                   if (message['source'] == 'business_app' || message['source'] == 'history')
                                     Text(
                                       message['source'] == 'history' ? 'Historial importado' : 'Desde el celular',
