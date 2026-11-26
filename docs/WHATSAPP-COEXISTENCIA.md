@@ -46,6 +46,9 @@ limite de 5 MB (JPEG/PNG/WebP). Las URLs y tokens no llegan al navegador. Los
 archivos vencidos o ausentes en historial muestran un error explicito.
 Tocar la imagen abre la vista ampliada; si la descarga falla, se ofrece reintento.
 El chat omite la etiqueta generica de imagen recibida, conservando los captions reales.
+El inbox ocupa el ancho y alto disponibles del espacio de la empresa, sin el
+limite de ancho de los dashboards ni una altura fija. En movil conserva la
+navegacion entre lista y conversacion.
 Cada mensaje muestra su hora local y los salientes distinguen aceptado por Meta,
 enviado, entregado, leido y fallido. Los eventos Realtime de insercion y
 actualizacion se aplican directamente al chat, sin esperar consultas completas

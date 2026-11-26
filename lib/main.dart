@@ -2534,6 +2534,15 @@ class _TenantModuleContent extends StatelessWidget {
     final isWhatsApp = module.label == 'WhatsApp Business';
     final isUsers = module.label == 'Usuarios y permisos';
     final isAutomations = module.label == 'Automatizaciones';
+    if (isWhatsApp) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: _WhatsAppBusinessInbox(
+          key: ValueKey(tenant['id']),
+          tenantId: tenant['id'] as String,
+        ),
+      );
+    }
     if (isAutomations) {
       return FlowBuilder(
         key: ValueKey(tenant['id']),
@@ -2602,10 +2611,6 @@ class _TenantModuleContent extends StatelessWidget {
                 else if (isDashboard) ...[
                   _OperationsDashboard(tenantName: tenant['name'] as String),
                 ],
-                if (isWhatsApp)
-                  _WhatsAppBusinessInbox(
-                    tenantId: tenant['id'] as String,
-                  ),
                 if (module.label == 'Clientes') const _DemoClientsPage(),
                 if (module.label == 'Tickets') const _DemoTicketsPage(),
                 if (module.label == 'Agenda') const _DemoAgendaPage(),
@@ -5204,7 +5209,7 @@ class _CompanySettings extends StatelessWidget {
 }
 
 class _WhatsAppBusinessInbox extends StatefulWidget {
-  const _WhatsAppBusinessInbox({required this.tenantId});
+  const _WhatsAppBusinessInbox({super.key, required this.tenantId});
 
   final String tenantId;
 
@@ -5438,10 +5443,11 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
         final showProfile = constraints.maxWidth >= 1050;
         final compact = constraints.maxWidth < 650;
         return Card(
-          margin: const EdgeInsets.only(bottom: 24),
+          margin: EdgeInsets.zero,
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
-            height: (MediaQuery.sizeOf(context).height - 250).clamp(460.0, 760.0),
+            width: double.infinity,
+            height: constraints.maxHeight,
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : compact
