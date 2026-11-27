@@ -46,7 +46,8 @@ Deno.test("production bots isolate tenants, opt in, deduplicate, serialize and p
       create table whatsapp_messages(id uuid primary key default gen_random_uuid(),tenant_id uuid,
         conversation_id uuid,whatsapp_account_id uuid,source text,direction text,original_message_id text);
       create table tenant_api_resources(id uuid primary key,tenant_id uuid,http_method text,
-        enabled boolean default true,enabled_for_automation boolean default false,allow_automation_writes boolean default false);
+        integration_id uuid,path text,enabled boolean default true,enabled_for_automation boolean default false,allow_automation_writes boolean default false);
+      create table tenant_api_integrations(id uuid primary key,tenant_id uuid,base_url text,auth_type text,auth_config jsonb,enabled boolean);
       insert into auth.users values('${owner}'),('${operator}');
       insert into tenants values('${tenant}'),('${other}');
       insert into tenant_memberships values('${tenant}','${owner}','tenant_admin',true),
@@ -55,12 +56,19 @@ Deno.test("production bots isolate tenants, opt in, deduplicate, serialize and p
       insert into whatsapp_conversations values('${conversation}','${tenant}','${account}');
     `);
     for (const migration of ["20261106183000_automation_flows.sql", "20261106193000_expand_automation_canvas.sql",
-      "20261125170000_whatsapp_automation_runtime.sql"]) {
+      "20261125170000_whatsapp_automation_runtime.sql", "20261127180000_bot_worker_read_permissions.sql"]) {
       await db.exec(await Deno.readTextFile(new URL(`../migrations/${migration}`, import.meta.url)));
     }
     await query("insert into automation_flows(id,tenant_id,name,draft) values($1,$2,'Real',$3)", [flow, tenant, JSON.stringify(graph)]);
     await query("insert into automation_flow_versions(tenant_id,flow_id,version,name,graph) values($1,$2,1,'Real',$3)",
       [tenant, flow, JSON.stringify(graph)]);
+    await db.exec("set role service_role");
+    const workerGraph = await query("select graph from automation_flow_versions where tenant_id=$1 and flow_id=$2 and version=1", [tenant,flow]);
+    assert.deepEqual(workerGraph.rows[0].graph, graph);
+    await query("select integration_id,path,http_method,enabled,enabled_for_automation,allow_automation_writes from tenant_api_resources where tenant_id=$1 and id=$2", [tenant,flow]);
+    await query("select base_url,auth_type,auth_config,enabled from tenant_api_integrations where tenant_id=$1 and id=$2", [tenant,flow]);
+    await assert.rejects(query("update automation_flow_versions set graph='{}'"), /permission denied/);
+    await db.exec("reset role");
     await inbound();
     assert.equal((await query("select * from whatsapp_bot_jobs")).rows.length, 0);
     await login(operator);

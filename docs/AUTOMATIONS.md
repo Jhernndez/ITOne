@@ -55,7 +55,7 @@ El webhook despierta al worker; `pg_cron` + `pg_net` recuperan los trabajos pend
 
 ## Despliegue
 
-Aplicar en orden las migraciones de flujos y recursos API, incluida `20261106193000_expand_automation_canvas.sql`, `20261125170000_whatsapp_automation_runtime.sql`, `20261125171000_whatsapp_automation_scheduler.sql` y `20261127170000_automation_flow_lifecycle.sql`.
+Aplicar en orden las migraciones de flujos y recursos API, incluida `20261106193000_expand_automation_canvas.sql`, `20261125170000_whatsapp_automation_runtime.sql`, `20261125171000_whatsapp_automation_scheduler.sql`, `20261127170000_automation_flow_lifecycle.sql` y `20261127180000_bot_worker_read_permissions.sql`.
 
 Configurar un secreto aleatorio `WHATSAPP_BOT_WORKER_SECRET` en Edge Function Secrets y el mismo valor en Vault con nombre `itone_bot_worker_secret`. Guardar la URL absoluta de `/functions/v1/whatsapp-bot-worker` en Vault como `itone_bot_worker_url`. No guardar estos valores en Git ni exponerlos a Flutter.
 
