@@ -5,6 +5,19 @@ import 'package:itone/features/automations/flow_builder.dart';
 import 'package:itone/features/automations/flow_graph.dart';
 import 'package:itone/features/automations/flow_repository.dart';
 import 'package:itone/features/automations/flow_canvas.dart';
+import 'package:itone/features/automations/flow_backup_files.dart';
+
+class _BackupFiles extends FlowBackupFiles {
+  Map<String, dynamic>? backup;
+  @override
+  Future<bool> save(Map<String, dynamic> value) async {
+    backup = value;
+    return true;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> open() async => backup;
+}
 
 class _Repository extends FlowRepository {
   _Repository()
@@ -21,6 +34,7 @@ class _Repository extends FlowRepository {
   String? tenant;
   int writes = 0;
   int publications = 0;
+  bool protected = false;
   @override
   Future<List<Map<String, dynamic>>> apiResources(String tenantId) async {
     tenant = tenantId;
@@ -89,6 +103,48 @@ class _Repository extends FlowRepository {
   @override
   Future<List<FlowVersion>> versions(String tenantId, String flowId) async =>
       snapshots.toList();
+
+  @override
+  Future<Map<String, dynamic>> exportBackup(
+    String tenantId,
+    String flowId,
+  ) async => {
+    'tenant_id': tenantId,
+    'name': flows.firstWhere((flow) => flow.id == flowId).name,
+    'draft': flows.firstWhere((flow) => flow.id == flowId).graph.toJson(),
+  };
+
+  @override
+  Future<SavedFlow> restoreBackup(
+    String tenantId,
+    Map<String, dynamic> backup,
+  ) async {
+    final flow = SavedFlow({
+      'id': 'restored',
+      'name': backup['name'],
+      'draft': backup['draft'],
+      'revision': 1,
+      'published_version': null,
+    });
+    flows.add(flow);
+    return flow;
+  }
+
+  @override
+  Future<void> deleteVersion(
+    String tenantId,
+    String flowId,
+    int version,
+  ) async {
+    if (protected) throw const PostgrestException(message: 'Versión vinculada');
+    snapshots.removeWhere((snapshot) => snapshot.version == version);
+  }
+
+  @override
+  Future<void> deleteFlow(String tenantId, SavedFlow flow) async {
+    if (protected) throw const PostgrestException(message: 'Flujo vinculado');
+    flows.removeWhere((saved) => saved.id == flow.id);
+  }
 }
 
 void main() {
@@ -97,6 +153,7 @@ void main() {
     _Repository repository, {
     bool edit = true,
     bool mobile = false,
+    FlowBackupFiles? backupFiles,
   }) async {
     tester.view.physicalSize = mobile
         ? const Size(390, 844)
@@ -111,6 +168,7 @@ void main() {
             tenantId: 'company-one',
             canEdit: edit,
             repository: repository,
+            backupFiles: backupFiles,
           ),
         ),
       ),
@@ -126,6 +184,43 @@ void main() {
     await tester.tap(f);
     await tester.pumpAndSettle();
   }
+
+  testWidgets('exports, restores a new flow, and confirms protected deletion', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final files = _BackupFiles();
+    await open(tester, repository, backupFiles: files);
+    await tap(tester, 'Guardar borrador');
+    await tap(tester, 'Publicar versión');
+    await tap(tester, 'Exportar respaldo');
+    expect(files.backup?['tenant_id'], 'company-one');
+    await tap(tester, 'Restaurar respaldo');
+    await tap(tester, 'Seleccionar archivo');
+    expect(repository.flows.length, 2);
+    expect(
+      find.text('Flujo restaurado sin activar ningún bot.'),
+      findsOneWidget,
+    );
+    repository.protected = true;
+    await tap(tester, 'Eliminar flujo');
+    await tester.tap(find.text('Eliminar flujo').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Flujo vinculado'), findsOneWidget);
+    expect(repository.flows.length, 2);
+    repository.protected = false;
+    await tap(tester, 'Eliminar flujo');
+    await tester.tap(find.text('Eliminar flujo').last);
+    await tester.pumpAndSettle();
+    expect(repository.flows.length, 1);
+    await tap(tester, 'Versiones');
+    await tester.tap(find.byTooltip('Eliminar versión 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Eliminar versión').last);
+    await tester.pumpAndSettle();
+    expect(repository.snapshots, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'API node selects a real tenant resource and persists JSON response mapping',

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'flow_graph.dart';
+import 'flow_backup_files.dart';
 import 'flow_repository.dart';
 import 'flow_canvas.dart';
 
@@ -13,12 +14,14 @@ class FlowBuilder extends StatefulWidget {
     required this.tenantId,
     required this.canEdit,
     this.repository,
+    this.backupFiles,
     this.fullscreen = false,
     this.onToggleFullscreen,
   });
   final String tenantId;
   final bool canEdit;
   final FlowRepository? repository;
+  final FlowBackupFiles? backupFiles;
   final bool fullscreen;
   final VoidCallback? onToggleFullscreen;
   @override
@@ -28,6 +31,7 @@ class FlowBuilder extends StatefulWidget {
 class _FlowBuilderState extends State<FlowBuilder> {
   late final _repository =
       widget.repository ?? FlowRepository(Supabase.instance.client);
+  late final _backupFiles = widget.backupFiles ?? FlowBackupFiles();
   final _name = TextEditingController(text: 'Nuevo flujo');
   final _transform = TransformationController();
   final _canvasKey = GlobalKey();
@@ -321,6 +325,142 @@ class _FlowBuilderState extends State<FlowBuilder> {
     );
   }
 
+  Future<bool> _confirm(String title, String message, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(action),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _export() async {
+    final flow = _saved;
+    if (flow == null || _busy) return;
+    if (_dirty &&
+        !await _confirm(
+          'Exportar respaldo',
+          'El respaldo incluye el último borrador guardado y sus versiones, no los cambios sin guardar. ¿Continuar?',
+          'Exportar',
+        )) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final backup = await _repository.exportBackup(widget.tenantId, flow.id);
+      final saved = await _backupFiles.save(backup);
+      if (!saved) return;
+      if (mounted) {
+        setState(
+          () => _notice = 'Respaldo preparado. Guárdalo en un lugar seguro.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'No se pudo exportar: ${_failure(error)}');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restore() async {
+    if (_busy || !widget.canEdit || !await _discard() || !mounted) return;
+    final confirmed = await _confirm(
+      'Restaurar respaldo',
+      'Se creará un flujo nuevo con el borrador y las versiones del archivo de esta empresa. No se activará ningún bot ni se sobrescribirán flujos.',
+      'Seleccionar archivo',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final decoded = await _backupFiles.open();
+      if (decoded == null) return;
+      final restored = await _repository.restoreBackup(
+        widget.tenantId,
+        decoded,
+      );
+      if (!mounted) return;
+      setState(() {
+        _flows = [restored, ..._flows];
+        _select(restored);
+        _notice = 'Flujo restaurado sin activar ningún bot.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'No se pudo restaurar: ${_failure(error)}');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteFlow() async {
+    final flow = _saved;
+    if (flow == null || _busy || !widget.canEdit) return;
+    if (!await _confirm(
+          'Eliminar flujo',
+          'Se eliminarán el borrador${_dirty ? ', los cambios sin guardar' : ''} y todas sus versiones. Esta acción no se puede deshacer. Los flujos vinculados a números o sesiones no se pueden eliminar. Puedes exportar un respaldo antes.',
+          'Eliminar flujo',
+        ) ||
+        !mounted) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      await _repository.deleteFlow(widget.tenantId, flow);
+      if (!mounted) return;
+      setState(() {
+        _flows.removeWhere((f) => f.id == flow.id);
+        if (_flows.isNotEmpty) {
+          _select(_flows.first);
+        } else {
+          _saved = null;
+          _graph = FlowGraph.blank();
+          _name.text = 'Nuevo flujo';
+          _dirty = false;
+          _selected = null;
+          _connecting = null;
+          _validation = [];
+          _transform.value = Matrix4.identity();
+        }
+        _notice = 'Flujo eliminado.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = 'No se pudo eliminar el flujo: ${_failure(error)}',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _versions() async {
     if (_saved == null) return;
     setState(() {
@@ -331,7 +471,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
       final versions = await _repository.versions(widget.tenantId, _saved!.id);
       if (!mounted) return;
       setState(() => _busy = false);
-      final selected = await showDialog<FlowVersion>(
+      final selected = await showDialog<({FlowVersion version, bool delete})>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Versiones publicadas'),
@@ -348,8 +488,20 @@ class _FlowBuilderState extends State<FlowBuilder> {
                         ListTile(
                           title: Text('v${v.version} · ${v.name}'),
                           subtitle: const Text('Inmutable · Probar sin envíos'),
-                          trailing: const Icon(Icons.play_arrow),
-                          onTap: () => Navigator.pop(context, v),
+                          trailing: widget.canEdit
+                              ? IconButton(
+                                  tooltip: 'Eliminar versión ${v.version}',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () => Navigator.pop(context, (
+                                    version: v,
+                                    delete: true,
+                                  )),
+                                )
+                              : const Icon(Icons.play_arrow),
+                          onTap: () => Navigator.pop(context, (
+                            version: v,
+                            delete: false,
+                          )),
                         ),
                     ],
                   ),
@@ -363,16 +515,31 @@ class _FlowBuilderState extends State<FlowBuilder> {
         ),
       );
       if (selected != null && mounted) {
-        await _test(
-          selected.graph,
-          'Versión ${selected.version} · ${selected.name}',
-        );
+        if (!selected.delete) {
+          await _test(
+            selected.version.graph,
+            'Versión ${selected.version.version} · ${selected.version.name}',
+          );
+        } else if (await _confirm(
+              'Eliminar versión',
+              'Se eliminará la versión ${selected.version.version}. No se puede eliminar si está vinculada a un número o a sesiones de WhatsApp. Puedes exportar un respaldo antes.',
+              'Eliminar versión',
+            ) &&
+            mounted) {
+          setState(() => _busy = true);
+          await _repository.deleteVersion(
+            widget.tenantId,
+            _saved!.id,
+            selected.version.version,
+          );
+          if (mounted) setState(() => _notice = 'Versión eliminada.');
+        }
       }
     } catch (error) {
       if (mounted) {
         setState(
           () =>
-              _error = 'No se pudieron abrir las versiones: ${_failure(error)}',
+              _error = 'No se pudo gestionar las versiones: ${_failure(error)}',
         );
       }
     } finally {
@@ -569,6 +736,20 @@ class _FlowBuilderState extends State<FlowBuilder> {
                   onPressed: _busy || _saved == null ? null : _versions,
                   child: const Text('Versiones'),
                 ),
+                OutlinedButton(
+                  onPressed: _busy || _saved == null ? null : _export,
+                  child: const Text('Exportar respaldo'),
+                ),
+                if (widget.canEdit) ...[
+                  OutlinedButton(
+                    onPressed: _busy ? null : _restore,
+                    child: const Text('Restaurar respaldo'),
+                  ),
+                  OutlinedButton(
+                    onPressed: _busy || _saved == null ? null : _deleteFlow,
+                    child: const Text('Eliminar flujo'),
+                  ),
+                ],
               ],
             ),
           ),

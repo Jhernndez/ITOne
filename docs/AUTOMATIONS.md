@@ -12,6 +12,14 @@ Todos los bots empiezan desactivados. Publicar, desplegar o actualizar un flujo 
 
 Las versiones antiguas marcadas `simulation` permanecen inmutables y requieren la misma activación explícita. Las nuevas versiones se marcan `published`.
 
+## Respaldos y eliminación
+
+En el constructor, **Exportar respaldo** descarga un JSON con el último borrador guardado y las versiones publicadas; no incluye cambios sin guardar, vínculos de números ni sesiones. El archivo puede contener datos sensibles de la configuración: guárdalo de forma segura.
+
+**Restaurar respaldo** crea un flujo nuevo en la misma empresa de origen, con sus versiones, sin sobrescribir flujos ni activar bots. Los recursos API referenciados deben seguir disponibles y autorizados al activar una versión. El respaldo admite hasta 1000 versiones y 20 MB.
+
+Un administrador puede eliminar un flujo completo o una versión tras confirmar. Se bloquea la eliminación si existe cualquier vínculo con un número (incluso desactivado) o una sesión de WhatsApp, para preservar la operación y el historial. No se eliminan vínculos ni sesiones automáticamente. Las versiones eliminadas no se reutilizan al publicar nuevamente. Un supervisor puede exportar y probar, pero no restaurar ni eliminar.
+
 ## Bloques
 
 - Texto: envía un mensaje de hasta 4096 caracteres.
@@ -47,7 +55,7 @@ El webhook despierta al worker; `pg_cron` + `pg_net` recuperan los trabajos pend
 
 ## Despliegue
 
-Aplicar en orden las migraciones de recursos API, `20261125170000_whatsapp_automation_runtime.sql` y `20261125171000_whatsapp_automation_scheduler.sql`.
+Aplicar en orden las migraciones de flujos y recursos API, incluida `20261106193000_expand_automation_canvas.sql`, `20261125170000_whatsapp_automation_runtime.sql`, `20261125171000_whatsapp_automation_scheduler.sql` y `20261127170000_automation_flow_lifecycle.sql`.
 
 Configurar un secreto aleatorio `WHATSAPP_BOT_WORKER_SECRET` en Edge Function Secrets y el mismo valor en Vault con nombre `itone_bot_worker_secret`. Guardar la URL absoluta de `/functions/v1/whatsapp-bot-worker` en Vault como `itone_bot_worker_url`. No guardar estos valores en Git ni exponerlos a Flutter.
 
@@ -58,6 +66,6 @@ La conexión efectiva sigue dependiendo de la autorización y elegibilidad del n
 ## Pruebas
 
 ```powershell
-deno test --no-lock --allow-read --allow-env supabase\functions\_shared\automation_runtime.test.ts supabase\tests\whatsapp_bot_test.ts
+deno test --no-lock --allow-read --allow-env supabase\functions\_shared\automation_runtime.test.ts supabase\tests\whatsapp_bot_test.ts supabase\tests\automation_flows_test.ts supabase\tests\automation_flow_lifecycle_test.ts
 flutter test --no-pub test\bot_controls_test.dart test\flow_builder_test.dart
 ```

@@ -89,4 +89,52 @@ class FlowRepository {
         .order('version', ascending: false);
     return rows.map(FlowVersion.new).toList();
   }
+
+  Future<Map<String, dynamic>> exportBackup(
+    String tenantId,
+    String flowId,
+  ) async {
+    final result = await client.rpc(
+      'export_automation_flow',
+      params: {'p_tenant_id': tenantId, 'p_flow_id': flowId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<SavedFlow> restoreBackup(
+    String tenantId,
+    Map<String, dynamic> backup,
+  ) async {
+    final result = await client.rpc(
+      'restore_automation_flow',
+      params: {'p_tenant_id': tenantId, 'p_backup': backup},
+    );
+    return SavedFlow(Map<String, dynamic>.from(result as Map));
+  }
+
+  Future<void> deleteVersion(
+    String tenantId,
+    String flowId,
+    int version,
+  ) async {
+    await client.rpc(
+      'delete_automation_version',
+      params: {
+        'p_tenant_id': tenantId,
+        'p_flow_id': flowId,
+        'p_version': version,
+      },
+    );
+  }
+
+  Future<void> deleteFlow(String tenantId, SavedFlow flow) async {
+    await client.rpc(
+      'delete_automation_flow',
+      params: {
+        'p_tenant_id': tenantId,
+        'p_flow_id': flow.id,
+        'p_expected_revision': flow.revision,
+      },
+    );
+  }
 }
