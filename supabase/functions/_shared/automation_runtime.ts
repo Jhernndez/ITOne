@@ -61,6 +61,38 @@ function payload(raw: string | undefined, variables: Record<string, RuntimeValue
   return resolve(parsed) as Record<string, RuntimeValue>;
 }
 
+function dynamicOptions(n: RuntimeNode, variables: Record<string, RuntimeValue>): {label: string; value: string}[] {
+  const source = n.config.options_source;
+  if (!source || !/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)*$/.test(source)) {
+    throw new Error("Fuente de opciones no válida");
+  }
+  const labelKey = n.config.option_label;
+  const valueKey = n.config.option_value;
+  if (!labelKey || !valueKey || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(labelKey) ||
+      !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(valueKey)) {
+    throw new Error("Campos de opciones no válidos");
+  }
+  const options = valueAt(variables, source);
+  if (!Array.isArray(options)) throw new Error("La fuente de opciones debe ser una lista");
+  const choices = options.slice(0, 3).map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item) ||
+        !Object.hasOwn(item, labelKey) || !Object.hasOwn(item, valueKey)) {
+      throw new Error("Faltan campos en las opciones");
+    }
+    const label = item[labelKey], value = item[valueKey];
+    if (typeof label !== "string" || !label.trim() || label.length > 200 ||
+        typeof value !== "string" || !value.trim() || value.length > 200) {
+      throw new Error("Opciones no válidas");
+    }
+    return { label: label.trim(), value };
+  });
+  if (new Set(choices.map((choice) => choice.label.toLocaleLowerCase())).size !== choices.length ||
+      new Set(choices.map((choice) => choice.value)).size !== choices.length) {
+    throw new Error("Las opciones deben tener etiquetas y valores únicos");
+  }
+  return choices;
+}
+
 export async function executeFlow(
   graph: RuntimeGraph, state: RuntimeState, input: string | null, effects: RuntimeEffects,
 ) {
@@ -83,6 +115,21 @@ export async function executeFlow(
     const n = node();
     if (!["question", "options"].includes(n.kind)) throw new Error("Espera de respuesta no válida");
     const text = input.trim();
+    if (n.kind === "options" && n.config.options_mode === "dynamic") {
+      const options = dynamicOptions(n, state.variables);
+      const choice = options.find((v, i) => v.label.toLocaleLowerCase() === text.toLocaleLowerCase() || String(i + 1) === text);
+      if (!choice) {
+        if (++state.steps > 1000) throw new Error("La sesión alcanzó el límite de 1000 pasos");
+        await effects.save(state);
+        await effects.send(`Selecciona una opción:\n${options.map((v, i) => `${i + 1}. ${v.label}`).join("\n")}`, state.steps);
+        await effects.save(state);
+        return;
+      }
+      state.variables[n.config.variable] = choice.value;
+      state.status = "running";
+      next("Siguiente");
+      await effects.save(state);
+    } else {
     const options = (n.config.options ?? "").split("|").map((v) => v.trim()).filter(Boolean);
     const choice = n.kind === "options"
       ? options.find((v, i) => v.toLocaleLowerCase() === text.toLocaleLowerCase() || String(i + 1) === text)
@@ -98,6 +145,7 @@ export async function executeFlow(
     state.status = "running";
     next(n.kind === "options" ? choice : "Siguiente");
     await effects.save(state);
+    }
   }
   for (let count = 0; count < 30; count++) {
     if (++state.steps > 1000) throw new Error("La sesión alcanzó el límite de 1000 pasos");
@@ -111,7 +159,16 @@ export async function executeFlow(
       case "options": {
         let text = render(n.config.text ?? "", state.variables);
         if (n.kind === "options") {
-          text += `\n${(n.config.options ?? "").split("|").map((s, i) => `${i + 1}. ${s.trim()}`).join("\n")}`;
+          if (n.config.options_mode === "dynamic") {
+            const options = dynamicOptions(n, state.variables);
+            if (!options.length) {
+              next("Sin opciones");
+              break;
+            }
+            text += `\n${options.map((s, i) => `${i + 1}. ${s.label}`).join("\n")}`;
+          } else {
+            text += `\n${(n.config.options ?? "").split("|").map((s, i) => `${i + 1}. ${s.trim()}`).join("\n")}`;
+          }
         }
         if (!text.trim() || text.length > 4096) throw new Error("Mensaje vacío o demasiado largo");
         await effects.save(state);

@@ -3,6 +3,34 @@ import 'package:itone/features/automations/flow_graph.dart';
 
 void main() {
   test(
+    'appointment demo simulates dynamic options without making reservations',
+    () {
+      final graph = FlowGraph.demoAppointments('lookup', 'reserve');
+      expect(graph.validate(), isEmpty);
+      final run = FlowRun(graph);
+      run.answer('DEMO-001');
+      run.answer('Éxito');
+      expect(run.dynamicChoices.map((choice) => choice.label), [
+        'Lunes 09:00',
+        'Martes 10:00',
+        'Miércoles 11:00',
+      ]);
+      run.answer('Martes 10:00');
+      expect(run.variables['horario'], 'DEMO-H2');
+      run.answer('Éxito');
+      expect(run.finished, isTrue);
+      expect(run.messages.last.text, contains('No es una cita real'));
+      final noSlots = FlowGraph.demoAppointments('lookup', 'reserve');
+      noSlots.node('search').config['simulation_response'] =
+          '{"body":{"horarios":[]}}';
+      final empty = FlowRun(noSlots)
+        ..answer('DEMO-001')
+        ..answer('Éxito');
+      expect(empty.waiting.kind, FlowKind.handoff);
+      expect(empty.finished, isTrue);
+    },
+  );
+  test(
     'accepts 60 connected blocks and enforces size and connection limits',
     () {
       final graph = FlowGraph(

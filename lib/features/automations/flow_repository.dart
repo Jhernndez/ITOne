@@ -33,6 +33,25 @@ class FlowVersion {
 class FlowRepository {
   FlowRepository(this.client);
   final SupabaseClient client;
+  Future<({String lookup, String reserve})> installAppointmentDemo(
+    String tenantId,
+  ) async {
+    final response = await client.functions.invoke(
+      'demo-appointments/instalar',
+      body: {'tenant_id': tenantId},
+    );
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (response.status < 200 ||
+        response.status >= 300 ||
+        data['error'] != null) {
+      throw FunctionException(status: response.status, details: data);
+    }
+    return (
+      lookup: data['lookup_id'] as String,
+      reserve: data['reserve_id'] as String,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> apiResources(String tenantId) => client
       .from('tenant_api_resources')
       .select('id,name,http_method')

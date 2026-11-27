@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'flow_graph.dart';
+import 'api_mapping_dialog.dart';
 import 'flow_backup_files.dart';
 import 'flow_repository.dart';
 import 'flow_canvas.dart';
@@ -66,8 +67,11 @@ class _FlowBuilderState extends State<FlowBuilder> {
     super.dispose();
   }
 
-  String _failure(Object error) =>
-      error is PostgrestException ? error.message : '$error';
+  String _failure(Object error) => error is PostgrestException
+      ? error.message
+      : error is FunctionException && error.details is Map
+      ? (error.details as Map)['error']?.toString() ?? 'Error de la función'
+      : '$error';
   void _changed() {
     _dirty = true;
     _validation = [];
@@ -230,6 +234,50 @@ class _FlowBuilderState extends State<FlowBuilder> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _fit();
     });
+  }
+
+  Future<void> _appointmentDemo() async {
+    if (_busy || !widget.canEdit || !await _discard() || !mounted) return;
+    final accepted = await _confirm(
+      'Crear demostración de citas',
+      'Instala una API de prueba aislada para esta empresa con pacientes y citas ficticios. La reserva de prueba se ejecuta automáticamente al elegir horario. El flujo no se publica ni activa automáticamente. No uses datos personales.',
+      'Crear demostración',
+    );
+    if (!accepted || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final resources = await _repository.installAppointmentDemo(
+        widget.tenantId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _saved = null;
+        _name.text = 'DEMO - Citas ficticias';
+        _graph = FlowGraph.demoAppointments(
+          resources.lookup,
+          resources.reserve,
+        );
+        _selected = null;
+        _connecting = null;
+        _changed();
+        _notice = 'Demostración creada. Guarda el borrador; no contiene pacientes reales.';
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fit();
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = 'No se pudo crear la demostración: ${_failure(error)}',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _add(FlowKind kind, {Offset? at}) {
@@ -722,6 +770,10 @@ class _FlowBuilderState extends State<FlowBuilder> {
                   OutlinedButton(
                     onPressed: _busy ? null : _new,
                     child: const Text('Nuevo flujo'),
+                  ),
+                  OutlinedButton(
+                    onPressed: _busy ? null : _appointmentDemo,
+                    child: const Text('Crear demo de citas'),
                   ),
                 ],
                 OutlinedButton(
@@ -1236,6 +1288,21 @@ class _FlowBuilderState extends State<FlowBuilder> {
             node: node,
             tenantId: widget.tenantId,
             repository: _repository,
+            variables: {
+              'contact_name',
+              'contact_phone',
+              'last_message',
+              for (final item in _graph.nodes)
+                if (['question', 'options'].contains(item.kind.name) &&
+                    RegExp(r'^[a-zA-Z][a-zA-Z0-9_]{0,39}$')
+                        .hasMatch(item.config['variable'] ?? ''))
+                  item.config['variable']!,
+              for (final item in _graph.nodes)
+                if (item.kind == FlowKind.api &&
+                    RegExp(r'^[a-zA-Z][a-zA-Z0-9_]{0,39}$')
+                        .hasMatch(item.config['result_variable'] ?? ''))
+                  item.config['result_variable']!,
+            }.toList()..sort(),
             enabled: widget.canEdit && !_busy,
             onChanged: (values) => _configure(node, values),
           ),
@@ -1385,12 +1452,14 @@ class _NodeConfiguration extends StatefulWidget {
     required this.node,
     required this.tenantId,
     required this.repository,
+    required this.variables,
     required this.enabled,
     required this.onChanged,
   });
   final FlowNode node;
   final String tenantId;
   final FlowRepository repository;
+  final List<String> variables;
   final bool enabled;
   final ValueChanged<Map<String, String>> onChanged;
 
@@ -1415,6 +1484,12 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
       'variable': 'Variable',
     if (widget.node.kind == FlowKind.options)
       'options': 'Opciones separadas por |',
+    if (widget.node.kind == FlowKind.options) ...{
+      'options_mode': 'Tipo de opciones',
+      'options_source': 'Lista de resultados (ej. agenda.body.horarios)',
+      'option_label': 'Campo que verá el cliente (ej. nombre)',
+      'option_value': 'Campo a guardar (ej. id)',
+    },
     if (widget.node.kind == FlowKind.condition) 'equals': 'Es igual a',
     if (widget.node.kind == FlowKind.api) ...{
       'resource_id': 'Recurso API',
@@ -1422,6 +1497,7 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
       'body': 'Cuerpo de solicitud (JSON)',
       'result_variable': 'Variable de resultado',
       'result_path': 'Campo de respuesta opcional (body.estado)',
+      'simulation_response': 'Respuesta ficticia para simulación (JSON)',
     },
   };
   late final controllers = {
@@ -1462,8 +1538,87 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if (widget.node.kind == FlowKind.options)
+        SwitchListTile(
+          title: const Text('Opciones obtenidas de una API'),
+          subtitle: const Text(
+            'Muestra hasta tres opciones y guarda el valor elegido.',
+          ),
+          value: controllers['options_mode']!.text == 'dynamic',
+          onChanged: !widget.enabled
+              ? null
+              : (enabled) async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Cambiar tipo de opciones'),
+                      content: const Text(
+                        'Cambiar el tipo puede desconectar las salidas existentes. ¿Continuar?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancelar'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Cambiar'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm != true || !mounted) return;
+                  if (!enabled) {
+                    controllers['options_mode']!.text = '';
+                  } else {
+                    controllers['options_mode']!.text = 'dynamic';
+                    controllers['options_source']!.text =
+                        'agenda.body.horarios';
+                    controllers['option_label']!.text = 'nombre';
+                    controllers['option_value']!.text = 'id';
+                  }
+                  _update();
+                  setState(() {});
+                },
+        ),
+      if (widget.node.kind == FlowKind.api)
+        OutlinedButton.icon(
+          onPressed: !widget.enabled
+              ? null
+              : () async {
+                  final result =
+                      await showDialog<({String query, String body})>(
+                        context: context,
+                        builder: (_) => ApiMappingDialog(
+                          query: controllers['query']!.text,
+                          body: controllers['body']!.text,
+                          variables: widget.variables,
+                          getOnly: _resources.where(
+                            (r) => r['id'] == controllers['resource_id']!.text,
+                          ).firstOrNull?['http_method'] == 'GET',
+                        ),
+                      );
+                  if (result == null || !mounted) return;
+                  controllers['query']!.text = result.query;
+                  controllers['body']!.text = result.body;
+                  _update();
+                },
+          icon: const Icon(Icons.tune),
+          label: const Text('Configurar datos visualmente'),
+        ),
       for (final field in fields.entries)
-        if (field.key == 'resource_id')
+        if (widget.node.kind == FlowKind.options &&
+            (field.key == 'options_mode' ||
+                (field.key == 'options' &&
+                    controllers['options_mode']!.text == 'dynamic') ||
+                ([
+                      'options_source',
+                      'option_label',
+                      'option_value',
+                    ].contains(field.key) &&
+                    controllers['options_mode']!.text != 'dynamic')))
+          const SizedBox.shrink()
+        else if (field.key == 'resource_id')
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: DropdownButtonFormField<String>(
@@ -1518,7 +1673,8 @@ class _NodeConfigurationState extends State<_NodeConfiguration> {
       if (widget.node.kind == FlowKind.api)
         const Text(
           'Crea y habilita recursos en Configuración → Integraciones. '
-          'Usa {{variable}} en valores JSON. Lee resultados con {{api_result.body.campo}}.',
+          'Usa {{variable}} en valores JSON. Lee resultados con {{api_result.body.campo}}. '
+          'La respuesta ficticia se usa solo al simular; nunca llama a la API.',
         ),
       const Text(
         'Los cambios del bloque se aplican al borrador al escribir. '
@@ -1669,7 +1825,14 @@ class _FlowSimulationState extends State<FlowSimulation> {
                           spacing: 10,
                           runSpacing: 8,
                           children: [
-                            for (final port in run.waiting.ports)
+                            for (final port
+                                in run.waiting.kind == FlowKind.options &&
+                                        run.waiting.config['options_mode'] ==
+                                            'dynamic'
+                                    ? run.dynamicChoices.map(
+                                        (choice) => choice.label,
+                                      )
+                                    : run.waiting.ports)
                               FilledButton(
                                 onPressed: () => _answer(port),
                                 child: Text(port),

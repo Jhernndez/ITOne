@@ -35,6 +35,16 @@ class _Repository extends FlowRepository {
   int writes = 0;
   int publications = 0;
   bool protected = false;
+  int demoInstalls = 0;
+  @override
+  Future<({String lookup, String reserve})> installAppointmentDemo(
+    String tenantId,
+  ) async {
+    demoInstalls++;
+    tenant = tenantId;
+    return (lookup: 'lookup-resource', reserve: 'reserve-resource');
+  }
+
   @override
   Future<List<Map<String, dynamic>>> apiResources(String tenantId) async {
     tenant = tenantId;
@@ -184,6 +194,29 @@ void main() {
     await tester.tap(f);
     await tester.pumpAndSettle();
   }
+
+  testWidgets('installs an unactivated demo draft and allows simulation', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await open(tester, repository);
+    await tap(tester, 'Crear demo de citas');
+    await tap(tester, 'Crear demostración');
+    expect(repository.demoInstalls, 1);
+    expect(repository.tenant, 'company-one');
+    expect(repository.publications, 0);
+    await tap(tester, 'Guardar borrador');
+    final graph = repository.flows.single.graph;
+    expect(graph.node('search').config['resource_id'], 'lookup-resource');
+    expect(graph.node('book').config['resource_id'], 'reserve-resource');
+    expect(graph.validate(), isEmpty);
+    await tap(tester, 'Probar automatización');
+    expect(
+      find.textContaining('Bot simulado: Esta es una prueba'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('exports, restores a new flow, and confirms protected deletion', (
     tester,

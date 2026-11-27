@@ -29,6 +29,7 @@ jobs:
           supabase/functions/_shared/external_api_test.ts
           supabase/tests/automation_flows_test.ts
           supabase/tests/automation_flow_lifecycle_test.ts
+          supabase/tests/demo_appointments_test.ts
           supabase/tests/external_api_test.ts
           supabase/tests/whatsapp_bot_test.ts
           supabase/tests/platform_meta_configuration_test.ts

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum FlowKind {
   start('Inicio'),
   text('Enviar texto'),
@@ -31,6 +33,10 @@ class FlowNode {
       : kind.label;
   List<String> get ports => switch (kind) {
     FlowKind.end || FlowKind.handoff => [],
+    FlowKind.options when config['options_mode'] == 'dynamic' => [
+      'Siguiente',
+      'Sin opciones',
+    ],
     FlowKind.options =>
       (config['options'] ?? '')
           .split('|')
@@ -134,7 +140,18 @@ class FlowGraph {
               .hasMatch(n.config['variable'] ?? '')) {
         errors.add('${n.title}: variable no válida.');
       }
-      if (n.kind == FlowKind.options &&
+      if (n.kind == FlowKind.options && n.config['options_mode'] == 'dynamic') {
+        if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)*$')
+                .hasMatch(n.config['options_source'] ?? '') ||
+            !RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$')
+                .hasMatch(n.config['option_label'] ?? '') ||
+            !RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$')
+                .hasMatch(n.config['option_value'] ?? '')) {
+          errors.add(
+            '${n.title}: configura la lista y los campos de opciones.',
+          );
+        }
+      } else if (n.kind == FlowKind.options &&
           (n.ports.length < 2 ||
               n.ports.length > 6 ||
               n.ports.toSet().length != n.ports.length)) {
@@ -185,6 +202,74 @@ class FlowGraph {
     ],
     [const FlowEdge('start', 'Siguiente', 'end')],
   );
+
+  factory FlowGraph.demoAppointments(String lookupId, String reserveId) {
+    FlowNode n(
+      String id,
+      FlowKind kind,
+      double x,
+      double y,
+      Map<String, String> config,
+    ) => FlowNode(id, kind, x: x, y: y, config: config);
+    return FlowGraph(
+      [
+        n('start', FlowKind.start, 40, 100, {}),
+        n('patient', FlowKind.question, 320, 100, {
+          'title': 'Identificación ficticia',
+          'text': 'Esta es una prueba. Escribe DEMO-001 o DEMO-002; no envíes datos personales.',
+          'variable': 'cedula',
+        }),
+        n('search', FlowKind.api, 600, 100, {
+          'title': 'Buscar horarios ficticios',
+          'resource_id': lookupId,
+          'query': '{}',
+          'body': '{"cedula":"{{cedula}}"}',
+          'result_variable': 'agenda',
+          'result_path': '',
+          'simulation_response': '{"body":{"horarios":[{"id":"DEMO-H1","nombre":"Lunes 09:00"},{"id":"DEMO-H2","nombre":"Martes 10:00"},{"id":"DEMO-H3","nombre":"Miércoles 11:00"}]}}',
+        }),
+        n('choice', FlowKind.options, 880, 100, {
+          'title': 'Escoger horario ficticio',
+          'text': 'Selecciona un horario de prueba:',
+          'variable': 'horario',
+          'options_mode': 'dynamic',
+          'options_source': 'agenda.body.horarios',
+          'option_label': 'nombre',
+          'option_value': 'id',
+        }),
+        n('book', FlowKind.api, 1160, 100, {
+          'title': 'Asignar o cambiar cita ficticia',
+          'resource_id': reserveId,
+          'query': '{}',
+          'body': '{"cedula":"{{cedula}}","horario":"{{horario}}"}',
+          'result_variable': 'reserva',
+          'result_path': '',
+          'simulation_response': '{"body":{"horario":"Horario ficticio"}}',
+        }),
+        n('success', FlowKind.text, 1440, 100, {
+          'text':
+              'Cita de prueba: {{reserva.body.horario}}. No es una cita real.',
+        }),
+        n('end', FlowKind.end, 1720, 100, {}),
+        n('failure', FlowKind.text, 880, 450, {
+          'text': 'No encontramos el paciente ficticio o no hay horarios disponibles. Pasaremos a atención humana.',
+        }),
+        n('human', FlowKind.handoff, 1160, 450, {}),
+      ],
+      [
+        const FlowEdge('start', 'Siguiente', 'patient'),
+        const FlowEdge('patient', 'Siguiente', 'search'),
+        const FlowEdge('search', 'Éxito', 'choice'),
+        const FlowEdge('search', 'Error', 'failure'),
+        const FlowEdge('choice', 'Siguiente', 'book'),
+        const FlowEdge('choice', 'Sin opciones', 'failure'),
+        const FlowEdge('book', 'Éxito', 'success'),
+        const FlowEdge('book', 'Error', 'failure'),
+        const FlowEdge('success', 'Siguiente', 'end'),
+        const FlowEdge('failure', 'Siguiente', 'human'),
+      ],
+    );
+  }
 
   factory FlowGraph.patientTemplate() {
     FlowNode n(
@@ -260,7 +345,7 @@ class FlowRun {
     _advance();
   }
   final FlowGraph graph;
-  final Map<String, String> variables = {};
+  final Map<String, dynamic> variables = {};
   final List<({bool incoming, String text})> messages = [];
   final List<String> trace = [];
   late String current;
@@ -268,16 +353,60 @@ class FlowRun {
   bool failed = false;
   int _steps = 0;
   FlowNode get waiting => graph.node(current);
-  String render(String text) => text.replaceAllMapped(
-    RegExp(r'\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}'),
-    (m) {
-      final value = variables[m[1]];
-      if (value == null) {
-        throw FormatException('Falta la variable ${m[1]} en ${waiting.title}.');
+  String render(String text) =>
+      text.replaceAllMapped(RegExp(r'\{\{([a-zA-Z][a-zA-Z0-9_.]*)\}\}'), (m) {
+        final value = _valueAt(variables, m[1]!);
+        return value is String ? value : jsonEncode(value);
+      });
+  dynamic _valueAt(dynamic value, String path) {
+    for (final part in path.split('.')) {
+      if (value is Map && value.containsKey(part)) {
+        value = value[part];
+      } else if (value is List &&
+          int.tryParse(part) != null &&
+          int.parse(part) >= 0 &&
+          int.parse(part) < value.length) {
+        value = value[int.parse(part)];
+      } else {
+        throw FormatException('Falta la variable $path en ${waiting.title}.');
       }
-      return value;
-    },
-  );
+    }
+    return value;
+  }
+
+  List<({String label, String value})> get dynamicChoices {
+    final n = waiting;
+    final source = _valueAt(variables, n.config['options_source']!);
+    if (source is! List) {
+      throw const FormatException('La fuente debe ser una lista.');
+    }
+    final choices = source.take(3).map((item) {
+      if (item is! Map ||
+          item[n.config['option_label']] is! String ||
+          item[n.config['option_value']] is! String) {
+        throw const FormatException(
+          'Faltan campos de opciones en la respuesta ficticia.',
+        );
+      }
+      final label = item[n.config['option_label']] as String;
+      final value = item[n.config['option_value']] as String;
+      if (label.trim().isEmpty ||
+          label.length > 200 ||
+          value.trim().isEmpty ||
+          value.length > 200) {
+        throw const FormatException('Las opciones ficticias no son válidas.');
+      }
+      return (label: label.trim(), value: value);
+    }).toList();
+    if (choices.map((choice) => choice.label.toLowerCase()).toSet().length !=
+            choices.length ||
+        choices.map((choice) => choice.value).toSet().length !=
+            choices.length) {
+      throw const FormatException('Las opciones ficticias deben ser únicas.');
+    }
+    return choices;
+  }
+
   void _next(String port) {
     final edge = graph.edges.singleWhere(
       (e) => e.from == current && e.port == port,
@@ -308,7 +437,8 @@ class FlowRun {
             );
           }
           _next(
-            value.toLowerCase() == n.config['equals']!.trim().toLowerCase()
+            value.toString().toLowerCase() ==
+                    n.config['equals']!.trim().toLowerCase()
                 ? 'Sí'
                 : 'No',
           );
@@ -324,7 +454,14 @@ class FlowRun {
           finished = true;
           trace.add('Transferencia simulada.');
           return;
-        case FlowKind.question || FlowKind.options:
+        case FlowKind.options:
+          if (n.config['options_mode'] == 'dynamic' && dynamicChoices.isEmpty) {
+            _next('Sin opciones');
+            continue;
+          }
+          messages.add((incoming: false, text: render(n.config['text']!)));
+          return;
+        case FlowKind.question:
           messages.add((incoming: false, text: render(n.config['text']!)));
           return;
         case FlowKind.api || FlowKind.review:
@@ -355,11 +492,22 @@ class FlowRun {
         variables[n.config['variable']!] = value.trim();
         port = 'Siguiente';
       case FlowKind.options:
-        if (!n.ports.contains(value)) {
-          throw const FormatException('Selecciona una opción del bloque.');
+        if (n.config['options_mode'] == 'dynamic') {
+          final choice = dynamicChoices
+              .where((choice) => choice.label == value)
+              .firstOrNull;
+          if (choice == null) {
+            throw const FormatException('Selecciona una opción del bloque.');
+          }
+          variables[n.config['variable']!] = choice.value;
+          port = 'Siguiente';
+        } else {
+          if (!n.ports.contains(value)) {
+            throw const FormatException('Selecciona una opción del bloque.');
+          }
+          variables[n.config['variable']!] = value;
+          port = value;
         }
-        variables[n.config['variable']!] = value;
-        port = value;
       case FlowKind.api || FlowKind.review:
         if (!n.ports.contains(value)) {
           throw const FormatException('Resultado simulado no válido.');
@@ -371,6 +519,19 @@ class FlowRun {
             );
           }
           variables['motivo_denegacion'] = reason.trim();
+        }
+        if (n.kind == FlowKind.api) {
+          final fixture = n.config['simulation_response']?.trim();
+          final raw = fixture == null || fixture.isEmpty
+              ? '{"body":{}}'
+              : fixture;
+          final result = value == 'Éxito' ? jsonDecode(raw) : {'ok': false};
+          final path = n.config['result_path'] ?? '';
+          final variable = n.config['result_variable'];
+          variables[variable?.isNotEmpty == true ? variable! : 'api_result'] =
+              value == 'Éxito' && path.isNotEmpty && fixture?.isNotEmpty == true
+              ? _valueAt(result, path)
+              : result;
         }
         port = value;
       default:

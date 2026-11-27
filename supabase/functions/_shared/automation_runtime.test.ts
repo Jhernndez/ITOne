@@ -52,6 +52,32 @@ Deno.test("options accept numbered input, repeat invalid choices and condition b
   assert.equal(s.status, "completed");
   assert.equal(s.variables.tipo, "Soporte");
 });
+Deno.test("dynamic options expose at most three items, save the selected value and route empty lists", async () => {
+  const s = state(), e = effects(), g = graph();
+  g.nodes[1] = { id: "q", kind: "options", config: {
+    text: "Elige un horario", variable: "horario", options_mode: "dynamic", options_source: "agenda.body.horarios",
+    option_label: "nombre", option_value: "id",
+  } };
+  g.nodes[2] = { id: "t", kind: "text", config: { text: "Elegiste {{horario}}" } };
+  g.edges = [{ from: "s", port: "Siguiente", to: "q" }, { from: "q", port: "Siguiente", to: "t" },
+    { from: "q", port: "Sin opciones", to: "e" }, { from: "t", port: "Siguiente", to: "e" }];
+  s.variables.agenda = {body: {horarios: [
+    {id: "a", nombre: "Lunes"}, {id: "b", nombre: "Martes"}, {id: "c", nombre: "Miércoles"},
+    {id: "d", nombre: "Jueves"},
+  ]}};
+  await executeFlow(g, s, null, e.adapter);
+  assert.deepEqual(e.sent, ["Elige un horario\n1. Lunes\n2. Martes\n3. Miércoles"]);
+  await executeFlow(g, s, "4", e.adapter);
+  assert.equal(s.status, "waiting");
+  await executeFlow(g, s, "2", e.adapter);
+  assert.equal(s.variables.horario, "b");
+  assert.equal(e.sent.at(-1), "Elegiste b");
+  const empty = state(), emptyEffects = effects();
+  empty.variables.agenda = {body: {horarios: []}};
+  await executeFlow(g, empty, null, emptyEffects.adapter);
+  assert.equal(empty.status, "completed");
+  assert.deepEqual(emptyEffects.sent, []);
+});
 Deno.test("API JSON mapping escapes user input and exposes nested result variables", async () => {
   const s = state(), e = effects(), g = graph();
   s.variables.id = '"quoted"';

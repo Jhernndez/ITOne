@@ -33,6 +33,14 @@ Un administrador puede eliminar un flujo completo o una versión tras confirmar.
 
 Variables iniciales: `contact_name`, `contact_phone`, `last_message`. Las variables no existentes producen un error visible; no se sustituyen silenciosamente. Las llamadas API se autorizan según la configuración del recurso en el momento de ejecutarse. Las escrituras requieren consentimiento por recurso, además de habilitar su uso en automatizaciones.
 
+## Demostración de citas ficticias
+
+En Automatizaciones, **Crear demo de citas** instala una API separada para la empresa y prepara un borrador, sin publicarlo ni activar el bot. Usa únicamente `DEMO-001` o `DEMO-002` como identificaciones ficticias; nunca introduzcas datos de pacientes reales. Los horarios son simulados, están en hora de Bogotá y se muestran como máximo tres. La elección asigna o cambia la cita ficticia inmediatamente; si el paciente no existe, no hay cupos o ocurre un rechazo, el flujo deriva a atención humana. La reserva impide asignar el mismo horario a dos pacientes y conserva la anterior si el horario nuevo ya fue ocupado.
+
+El botón **Probar automatización** no llama a la API ni reserva: usa respuestas ficticias configuradas en los bloques API. Para ejecutar la API de prueba, usa los recursos DEMO desde Integraciones o activa explícitamente el flujo en un número. La demostración no se conecta a ninguna IPS. Una integración real requiere las especificaciones de esa IPS, autenticación, verificación de identidad adicional a la cédula, autorización, tratamiento de datos y validación de disponibilidad y conflictos.
+
+El bloque API ofrece **Configurar datos visualmente** para asociar nombres de parámetros con texto fijo o variables del flujo. El modo JSON sigue disponible para estructuras o tipos avanzados. Las opciones dinámicas seleccionan una lista de la respuesta, el campo a mostrar y el identificador que se guardará; sus salidas son **Siguiente** y **Sin opciones**. La lista y sus campos dependen del contrato de cada API y no se descubren automáticamente.
+
 ## Control humano y límites
 
 Responder desde ITONE o WhatsApp Business móvil pausa la conversación. También puedes pulsar **Tomar conversación**. La pausa se conserva hasta **Reactivar bot**, que descarta el recorrido y espera un nuevo mensaje. Las respuestas móviles dependen de recibir el webhook de ecos de Meta.
@@ -55,7 +63,7 @@ El webhook despierta al worker; `pg_cron` + `pg_net` recuperan los trabajos pend
 
 ## Despliegue
 
-Aplicar en orden las migraciones de flujos y recursos API, incluida `20261106193000_expand_automation_canvas.sql`, `20261125170000_whatsapp_automation_runtime.sql`, `20261125171000_whatsapp_automation_scheduler.sql`, `20261127170000_automation_flow_lifecycle.sql` y `20261127180000_bot_worker_read_permissions.sql`.
+Aplicar en orden las migraciones de flujos y recursos API, incluida `20261106193000_expand_automation_canvas.sql`, `20261125170000_whatsapp_automation_runtime.sql`, `20261125171000_whatsapp_automation_scheduler.sql`, `20261127170000_automation_flow_lifecycle.sql`, `20261127180000_bot_worker_read_permissions.sql`, `20261127181000_dynamic_automation_options.sql` y `20261127182000_demo_appointments.sql`. Desplegar `demo-appointments` sin verificación JWT del gateway: la instalación valida la sesión de administrador y la API de prueba autentica su clave por empresa; nunca exponer la clave de servicio.
 
 Configurar un secreto aleatorio `WHATSAPP_BOT_WORKER_SECRET` en Edge Function Secrets y el mismo valor en Vault con nombre `itone_bot_worker_secret`. Guardar la URL absoluta de `/functions/v1/whatsapp-bot-worker` en Vault como `itone_bot_worker_url`. No guardar estos valores en Git ni exponerlos a Flutter.
 
@@ -66,6 +74,6 @@ La conexión efectiva sigue dependiendo de la autorización y elegibilidad del n
 ## Pruebas
 
 ```powershell
-deno test --no-lock --allow-read --allow-env supabase\functions\_shared\automation_runtime.test.ts supabase\tests\whatsapp_bot_test.ts supabase\tests\automation_flows_test.ts supabase\tests\automation_flow_lifecycle_test.ts
-flutter test --no-pub test\bot_controls_test.dart test\flow_builder_test.dart
+deno test --no-lock --allow-read --allow-env supabase\functions\_shared\automation_runtime.test.ts supabase\functions\_shared\demo_appointments.test.ts supabase\tests\whatsapp_bot_test.ts supabase\tests\automation_flows_test.ts supabase\tests\automation_flow_lifecycle_test.ts supabase\tests\demo_appointments_test.ts
+flutter test --no-pub test\bot_controls_test.dart test\flow_builder_test.dart test\flow_graph_test.dart test\api_mapping_dialog_test.dart
 ```

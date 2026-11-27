@@ -54,6 +54,7 @@ Deno.test("flow drafts and immutable simulation versions enforce tenant roles an
     `);
     await db.exec(await Deno.readTextFile(new URL("../migrations/20261106183000_automation_flows.sql",import.meta.url)));
     await db.exec(await Deno.readTextFile(new URL("../migrations/20261106193000_expand_automation_canvas.sql",import.meta.url)));
+    await db.exec(await Deno.readTextFile(new URL("../migrations/20261127181000_dynamic_automation_options.sql",import.meta.url)));
     await login(admin);
     await assert.rejects(sql("select save_automation_flow($1,null,'Bad schema',$2,null)",[
       tenant,JSON.stringify({...graph,schema:"1"}),
@@ -108,6 +109,15 @@ Deno.test("flow drafts and immutable simulation versions enforce tenant roles an
     assert.deepEqual(snapshot,cycle);
     cycle.nodes[0].x = 1000000001;
     await assert.rejects(save(cycle),/posicion/);
+    const dynamic = structuredClone(graph);
+    dynamic.nodes[1].config = {text:"Elige",variable:"slot",options_mode:"dynamic",
+      options_source:"agenda.body.horarios",option_label:"nombre",option_value:"id"};
+    dynamic.edges[1].port="Siguiente"; dynamic.edges[2].port="Sin opciones";
+    const dynamicFlow = await save(dynamic);
+    await publish(dynamicFlow.id,1);
+    dynamic.nodes[1].config.option_value = "";
+    const invalidDynamic = await save(dynamic);
+    await assert.rejects(publish(invalidDynamic.id,1),/opciones dinamicas/);
     const orphan = structuredClone(graph);
     orphan.nodes.push({id:"orphan",kind:"end",x:900,y:900,config:{}});
     const orphaned = await save(orphan);
