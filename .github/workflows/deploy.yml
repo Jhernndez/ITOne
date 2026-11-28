@@ -32,6 +32,7 @@ jobs:
           supabase/tests/demo_appointments_test.ts
           supabase/tests/external_api_test.ts
           supabase/tests/whatsapp_bot_test.ts
+          supabase/tests/whatsapp_number_access_test.ts
           supabase/tests/platform_meta_configuration_test.ts
 
       - name: Set up Flutter

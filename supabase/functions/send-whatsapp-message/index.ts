@@ -98,6 +98,12 @@ export async function sendWhatsAppMessage(request: Request) {
       .maybeSingle();
     if (conversationError) throw conversationError;
     if (!conversation) return json({ error: "Conversation not found" }, 404);
+    const { data: permitted, error: accessError } = await userClient.rpc(
+      "can_access_whatsapp_number",
+      { p_tenant_id: tenantId, p_account_id: conversation.whatsapp_account_id },
+    );
+    if (accessError) throw accessError;
+    if (!permitted) return json({ error: "No tienes acceso a este número" }, 403);
 
     const account = Array.isArray(conversation.whatsapp_accounts)
       ? conversation.whatsapp_accounts[0]

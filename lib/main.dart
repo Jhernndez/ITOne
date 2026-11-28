@@ -12,6 +12,7 @@ import 'features/automations/demo_agenda.dart';
 import 'features/automations/bot_controls.dart';
 import 'features/external_api/external_api_panel.dart';
 import 'features/whatsapp/whatsapp_connection_header.dart';
+import 'features/whatsapp/cloud_number_form.dart';
 import 'features/whatsapp/platform_whatsapp_settings.dart';
 import 'features/whatsapp/message_image.dart';
 import 'features/whatsapp/message_status.dart';
@@ -2568,6 +2569,7 @@ class _TenantModuleContent extends StatelessWidget {
             Expanded(
               child: _TenantConfiguration(
                 tenant: tenant,
+                role: role,
                 onSaved: (sector) {
                   tenant['sector'] = sector;
                 },
@@ -3611,11 +3613,13 @@ class _TenantBrand extends StatelessWidget {
 class _TenantConfiguration extends StatefulWidget {
   const _TenantConfiguration({
     required this.tenant,
+    required this.role,
     required this.onSaved,
     required this.onLogoSaved,
   });
 
   final Map<String, dynamic> tenant;
+  final String role;
   final ValueChanged<String> onSaved;
   final ValueChanged<String> onLogoSaved;
 
@@ -3973,6 +3977,7 @@ class _TenantConfigurationState extends State<_TenantConfiguration> {
                           : _settingsTab == 3
                           ? _WhatsAppSettings(
                               tenantId: widget.tenant['id'] as String,
+                              canManage: widget.role == 'tenant_admin',
                             )
                           : _TenantNotificationSettings(
                               tenantId: widget.tenant['id'] as String,
@@ -4217,9 +4222,10 @@ class _TenantNotificationSettingsState
 }
 
 class _WhatsAppSettings extends StatelessWidget {
-  const _WhatsAppSettings({required this.tenantId});
+  const _WhatsAppSettings({required this.tenantId, required this.canManage});
 
   final String tenantId;
+  final bool canManage;
 
   @override
   Widget build(BuildContext context) {
@@ -4242,7 +4248,7 @@ class _WhatsAppSettings extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId),
+                _WhatsAppIntegrationPanel(key: ValueKey(tenantId), tenantId: tenantId, canManage: canManage),
                 WhatsAppTemplatesPanel(key: ValueKey('templates-$tenantId'), tenantId: tenantId),
                 BotSettingsPanel(key: ValueKey('bots-$tenantId'), tenantId: tenantId),
                 _WhatsAppSlaSettings(tenantId: tenantId),
@@ -4256,9 +4262,10 @@ class _WhatsAppSettings extends StatelessWidget {
 }
 
 class _WhatsAppIntegrationPanel extends StatefulWidget {
-  const _WhatsAppIntegrationPanel({super.key, required this.tenantId});
+  const _WhatsAppIntegrationPanel({super.key, required this.tenantId, required this.canManage});
 
   final String tenantId;
+  final bool canManage;
 
   @override
   State<_WhatsAppIntegrationPanel> createState() =>
@@ -4497,6 +4504,10 @@ class _WhatsAppIntegrationPanelState extends State<_WhatsAppIntegrationPanel> {
           ),
         ],
         if (_message != null) ...[const SizedBox(height: 14), Text(_message!)],
+        if (widget.canManage) ...[
+          const SizedBox(height: 20),
+          WhatsAppCloudNumberForm(tenantId: widget.tenantId),
+        ],
       ],
     );
   }
@@ -5155,6 +5166,8 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   final _messagesScrollController = ScrollController();
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _messages = [];
+  List<Map<String, dynamic>> _accounts = [];
+  String? _selectedAccountId;
   String? _selectedConversationId;
   bool _loading = true;
   bool _loadingMessages = false;
@@ -5168,8 +5181,51 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
   @override
   void initState() {
     super.initState();
-    _loadConversations();
-    _subscribeToWhatsAppChanges();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _loadAccounts();
+    if (mounted) _subscribeToWhatsAppChanges();
+  }
+
+  Future<void> _loadAccounts() async {
+    try {
+      final rows = await _client.from('whatsapp_accounts')
+          .select('id,name,display_phone_number,status')
+          .eq('tenant_id', widget.tenantId)
+          .order('created_at');
+      if (!mounted) return;
+      final accounts = rows.map((row) => Map<String, dynamic>.from(row)).toList();
+      setState(() {
+        _accounts = accounts;
+        if (!accounts.any((a) => a['id'] == _selectedAccountId)) {
+          _selectedAccountId = accounts.isEmpty ? null : accounts.first['id'] as String;
+          _selectedConversationId = null;
+          _messages = [];
+          _conversations = [];
+          _mobileChatOpen = false;
+        }
+      });
+      await _loadConversations();
+    } on PostgrestException catch (error) {
+      _accountLoadFailed(error.message);
+    } catch (_) {
+      _accountLoadFailed('No se pudieron cargar los números de WhatsApp.');
+    }
+  }
+
+  void _accountLoadFailed(String message) {
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = message;
+      _accounts = [];
+      _selectedAccountId = null;
+      _conversations = [];
+      _selectedConversationId = null;
+      _messages = [];
+    });
   }
 
   @override
@@ -5234,17 +5290,30 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
     bool preserveSelection = true,
     bool refreshMessages = true,
   }) async {
+    final accountId = _selectedAccountId;
+    if (accountId == null) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _conversations = [];
+          _selectedConversationId = null;
+          _messages = [];
+        });
+      }
+      return;
+    }
     final previousSelection = _selectedConversationId;
     try {
       final rows = await _client
           .from('whatsapp_conversations')
           .select('id, status, last_message_at, updated_at, whatsapp_contacts(display_name, profile_name, phone_number, whatsapp_user_id)')
           .eq('tenant_id', widget.tenantId)
+          .eq('whatsapp_account_id', accountId)
           .order('updated_at', ascending: false);
       final conversations = (rows as List)
           .map((row) => Map<String, dynamic>.from(row as Map))
           .toList();
-      if (!mounted) return;
+      if (!mounted || accountId != _selectedAccountId) return;
       setState(() {
         _conversations = conversations;
         _loading = false;
@@ -5411,9 +5480,46 @@ class _WhatsAppBusinessInboxState extends State<_WhatsAppBusinessInbox> {
           padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
           child: Row(children: [
             Expanded(child: Text('Conversaciones', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer))),
-            IconButton(tooltip: 'Actualizar', onPressed: _loadConversations, icon: const Icon(Icons.refresh)),
+            IconButton(tooltip: 'Actualizar', onPressed: _loadAccounts, icon: const Icon(Icons.refresh)),
           ]),
         ),
+        if (_accounts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(_selectedAccountId),
+              initialValue: _selectedAccountId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Número de WhatsApp'),
+              items: [
+                for (final account in _accounts)
+                  DropdownMenuItem(
+                    value: account['id'] as String,
+                    child: Text(
+                      '${account['name'] ?? 'WhatsApp'} · ${account['display_phone_number'] ?? 'Sin número'}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (id) {
+                if (id == null || id == _selectedAccountId) return;
+                setState(() {
+                  _selectedAccountId = id;
+                  _selectedConversationId = null;
+                  _messages = [];
+                  _conversations = [];
+                  _loading = true;
+                  _mobileChatOpen = false;
+                });
+                _loadConversations(preserveSelection: false);
+              },
+            ),
+          )
+        else
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('No tienes números asignados. Contacta al administrador.'),
+          ),
         if (_error != null)
           Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: TextStyle(color: theme.colorScheme.error))),
         const Padding(

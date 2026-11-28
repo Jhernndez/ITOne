@@ -30,6 +30,23 @@ Integracion > Conectar WhatsApp Business**, mediante Embedded Signup. No se
 requiere una segunda conexion manual. Coexistencia sigue usando Cloud API y
 el webhook para enviar, recibir e importar mensajes.
 
+El administrador tambien puede agregar un numero Cloud API desde **Configuracion >
+WhatsApp > Integracion > Agregar numero Cloud API** proporcionando el Phone Number
+ID, el ID de la cuenta de WhatsApp Business y un token de la aplicacion Meta de
+ITONE. El servidor valida el token y la pertenencia del numero y solicita la
+suscripcion al webhook. Esta opcion no conecta un numero del celular con
+coexistencia ni reemplaza una conexion existente. Los tokens temporales caducan.
+No compartas tokens por chat. Un numero de prueba de Meta esta sujeto a sus
+restricciones de destinatarios y no garantiza que una cuenta real bloqueada pueda enviar.
+
+Una empresa puede tener varios numeros. La bandeja permite seleccionar entre
+los numeros autorizados. Un administrador tiene acceso a todos y, desde
+**Usuarios y permisos**, asigna numeros a supervisores y operadores; estos no
+ven conversaciones ni envian mensajes hasta tener una asignacion. Esta
+restriccion tambien se aplica a los numeros ya existentes. La configuracion y
+activacion de bots siguen reservadas al administrador. Cada bot requiere
+activacion explicita en su numero.
+
 ### Separacion entre plataforma y empresas
 
 El webhook debe suscribirse a `messages`, `smb_message_echoes`,

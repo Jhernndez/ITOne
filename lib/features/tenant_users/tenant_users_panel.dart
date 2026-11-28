@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'tenant_user.dart';
+import '../whatsapp/number_access_dialog.dart';
 
 class TenantUsersPanel extends StatefulWidget {
   const TenantUsersPanel({
@@ -1014,6 +1015,20 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
                                 onPressed: () => _details(user),
                               ),
                               IconButton(
+                                tooltip: user.role == TenantRole.administrator
+                                    ? 'Los administradores acceden a todos los números'
+                                    : 'Permisos de números de WhatsApp',
+                                icon: const Icon(Icons.phone_android_outlined, size: 19),
+                                onPressed: _saving || _loading || user.role == TenantRole.administrator ? null : () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) => WhatsAppNumberAccessDialog(
+                                    tenantId: widget.tenantId,
+                                    userId: user.id,
+                                    userName: user.displayName,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
                                 tooltip: self
                                     ? 'No puedes editar tu propio acceso'
                                     : 'Editar ${user.displayName}',
@@ -1094,7 +1109,7 @@ class _TenantUsersPanelState extends State<TenantUsersPanel> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Los permisos se asignan por rol. No hay roles personalizados ni excepciones individuales.',
+          'Los permisos generales se asignan por rol. El acceso a conversaciones de WhatsApp se asigna por número.',
         ),
         const SizedBox(height: 16),
         for (final role in TenantRole.values)

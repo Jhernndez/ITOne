@@ -38,13 +38,17 @@ Deno.test("production bots isolate tenants, opt in, deduplicate, serialize and p
         'select nullif(current_setting(''request.jwt.claim.sub'',true),'''')::uuid';
       create table tenants(id uuid primary key);
       create table tenant_memberships(tenant_id uuid,user_id uuid,role text,is_active boolean default true);
+      create table platform_tenant_grants(tenant_id uuid, platform_user_id uuid);
       create function current_tenant_role(t uuid) returns text language sql stable security definer as
         'select role from tenant_memberships where tenant_id=t and user_id=auth.uid() and is_active';
       grant usage on schema public,auth to authenticated,service_role;
       create table whatsapp_accounts(id uuid primary key,tenant_id uuid,status text,onboarding_mode text,access_token text);
-      create table whatsapp_conversations(id uuid primary key,tenant_id uuid,whatsapp_account_id uuid);
+      create table whatsapp_conversations(id uuid primary key,tenant_id uuid,whatsapp_account_id uuid,contact_id uuid);
+      create table whatsapp_contacts(id uuid primary key,tenant_id uuid,whatsapp_account_id uuid);
       create table whatsapp_messages(id uuid primary key default gen_random_uuid(),tenant_id uuid,
         conversation_id uuid,whatsapp_account_id uuid,source text,direction text,original_message_id text);
+      create table notifications(tenant_id uuid,type text,data jsonb);
+      alter table notifications enable row level security;
       create table tenant_api_resources(id uuid primary key,tenant_id uuid,http_method text,
         integration_id uuid,path text,enabled boolean default true,enabled_for_automation boolean default false,allow_automation_writes boolean default false);
       create table tenant_api_integrations(id uuid primary key,tenant_id uuid,base_url text,auth_type text,auth_config jsonb,enabled boolean);
@@ -53,10 +57,11 @@ Deno.test("production bots isolate tenants, opt in, deduplicate, serialize and p
       insert into tenant_memberships values('${tenant}','${owner}','tenant_admin',true),
         ('${tenant}','${operator}','operator',true);
       insert into whatsapp_accounts values('${account}','${tenant}','active','coexistence','fake-token');
-      insert into whatsapp_conversations values('${conversation}','${tenant}','${account}');
+      insert into whatsapp_conversations(id,tenant_id,whatsapp_account_id) values('${conversation}','${tenant}','${account}');
     `);
     for (const migration of ["20261106183000_automation_flows.sql", "20261106193000_expand_automation_canvas.sql",
-      "20261125170000_whatsapp_automation_runtime.sql", "20261127180000_bot_worker_read_permissions.sql"]) {
+      "20261125170000_whatsapp_automation_runtime.sql", "20261127180000_bot_worker_read_permissions.sql",
+      "20261127184000_whatsapp_number_access.sql"]) {
       await db.exec(await Deno.readTextFile(new URL(`../migrations/${migration}`, import.meta.url)));
     }
     await query("insert into automation_flows(id,tenant_id,name,draft) values($1,$2,'Real',$3)", [flow, tenant, JSON.stringify(graph)]);
@@ -75,7 +80,12 @@ Deno.test("production bots isolate tenants, opt in, deduplicate, serialize and p
     await assert.rejects(query("select configure_whatsapp_bot($1,$2,$3,1,true)", [tenant, account, flow]), /administrador/);
     await assert.rejects(query("select claim_whatsapp_bot_job()"), /permission denied/);
     await login(owner);
+    await query("select set_whatsapp_number_access($1,$2,$3,true)", [tenant, account, operator]);
     await assert.rejects(query("select configure_whatsapp_bot($1,$2,$3,1,true)", [other, account, flow]), /administrador/);
+    await query("select configure_whatsapp_bot($1,$2,$3,1,true)", [tenant, account, flow]);
+    await db.exec("reset role");
+    await query("update whatsapp_accounts set onboarding_mode='cloud_api' where id=$1", [account]);
+    await login(owner);
     await query("select configure_whatsapp_bot($1,$2,$3,1,true)", [tenant, account, flow]);
     await db.exec("reset role");
     await inbound("history");

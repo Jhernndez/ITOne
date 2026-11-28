@@ -160,6 +160,7 @@ Deno.test("image endpoint scopes message/account, uses server credentials and re
   let role = "operator",
     disabled = false,
     found = true,
+    permitted = true,
     imageUrl = "https://lookaside.fbsbx.com/media";
   let size = 3, bytes = 3, downloads = 0;
   globalThis.fetch = (input, init) => {
@@ -168,6 +169,7 @@ Deno.test("image endpoint scopes message/account, uses server credentials and re
     if (url.includes("/auth/v1/user")) data = { id: "user" };
     else if (url.includes("/is_current_user_disabled")) data = disabled;
     else if (url.includes("/current_tenant_role")) data = role;
+    else if (url.includes("/can_access_whatsapp_number")) data = permitted;
     else if (url.includes("/whatsapp_messages")) {
       assert.ok(url.includes("tenant_id=eq.tenant"));
       data = found
@@ -232,6 +234,10 @@ Deno.test("image endpoint scopes message/account, uses server credentials and re
     found = false;
     assert.equal((await run()).status, 404);
     found = true;
+    permitted = false;
+    assert.equal((await run()).status, 403);
+    assert.equal(downloads, 1);
+    permitted = true;
     imageUrl = "https://internal.invalid/file";
     assert.equal((await run()).status, 502);
     assert.equal(downloads, 1);

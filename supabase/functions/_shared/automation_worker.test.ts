@@ -11,6 +11,7 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
   let claims = 0, sends = 0, persisted = 0;
   let enabled = true, uncertain = false, paused = false;
   let useBsuid = false;
+  let onboardingMode = "coexistence";
   let finished: string | null = null;
   let effectStatus = "";
   let session: Record<string, unknown> | null = null;
@@ -63,7 +64,7 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
       switch (table) {
         case "whatsapp_bot_bindings": return reply([{ enabled, flow_id: "flow", version: 1 }]);
         case "whatsapp_bot_sessions": return reply(session ? [session] : []);
-        case "whatsapp_accounts": return reply({ status: "active", onboarding_mode: "coexistence", phone_number_id: "phone", access_token: "account-test-token" });
+        case "whatsapp_accounts": return reply({ status: "active", onboarding_mode: onboardingMode, phone_number_id: "phone", access_token: "account-test-token" });
         case "whatsapp_conversations": return reply({ contact_id: "contact" });
         case "whatsapp_contacts": return reply({ phone_number: useBsuid ? null : "573001234567",
           whatsapp_user_id: useBsuid ? "US.test-recipient" : null,
@@ -106,6 +107,10 @@ Deno.test("worker authenticates, sends/persists once, completes skipped jobs and
     reset(); uncertain = false; useBsuid = true;
     await run();
     assert.equal(sends, 3); assert.equal(persisted, 2);
+    assert.equal(finished, "done"); assert.equal(effectStatus, "confirmed");
+    reset(); useBsuid = false; onboardingMode = "cloud_api";
+    await run();
+    assert.equal(sends, 4); assert.equal(persisted, 3);
     assert.equal(finished, "done"); assert.equal(effectStatus, "confirmed");
   } finally {
     globalThis.fetch = original;

@@ -38,7 +38,8 @@ async function processJob(client: SupabaseClient, job: Job) {
     if (previous?.status === "human" || previous?.status === "error") return;
     const account = checked(await client.from("whatsapp_accounts")
       .select("phone_number_id,access_token,onboarding_mode,status").eq("tenant_id", job.tenant_id).eq("id", job.account_id).single());
-    if (!account || account.status !== "active" || account.onboarding_mode !== "coexistence" || !account.access_token) {
+    if (!account || account.status !== "active" ||
+        !["coexistence", "cloud_api"].includes(account.onboarding_mode) || !account.access_token) {
       throw new Error("La conexión de este número requiere atención");
     }
     const conversation = checked(await client.from("whatsapp_conversations").select("contact_id")

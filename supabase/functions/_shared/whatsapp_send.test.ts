@@ -7,6 +7,7 @@ const account = "account-one";
 async function fixture(
   contact: Record<string, unknown>,
   run: (sent: Record<string, unknown>[]) => Promise<void>,
+  permitted = true,
 ) {
   const originalFetch = globalThis.fetch;
   const env = {
@@ -23,6 +24,7 @@ async function fixture(
     if (url.includes("/auth/v1/user")) data = { id: "user-one" };
     else if (url.includes("/rpc/current_tenant_role")) data = "tenant_admin";
     else if (url.includes("/rpc/is_current_user_disabled")) data = false;
+    else if (url.includes("/rpc/can_access_whatsapp_number")) data = permitted;
     else if (url.includes("/rpc/control_whatsapp_bot")) data = null;
     else if (
       url.includes("/whatsapp_conversations") && init?.method !== "PATCH"
@@ -82,6 +84,18 @@ function request() {
     }),
   });
 }
+
+Deno.test("manual replies reject an unassigned number without sending", async () => {
+  await fixture({
+    phone_number: "123456789",
+    whatsapp_user_id: null,
+    whatsapp_account_id: account,
+    tenant_id: tenant,
+  }, async (sent) => {
+    assert.equal((await sendWhatsAppMessage(request())).status, 403);
+    assert.equal(sent.length, 0);
+  }, false);
+});
 
 Deno.test("manual replies support account-scoped WhatsApp user IDs without phone numbers", async () => {
   await fixture({

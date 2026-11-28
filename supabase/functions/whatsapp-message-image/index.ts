@@ -82,6 +82,12 @@ export async function messageImage(request: Request) {
       ).eq("tenant_id", body.tenant_id).maybeSingle();
     if (error) throw error;
     if (!message) throw new WhatsAppError("Mensaje no encontrado.", 404);
+    const { data: permitted, error: accessError } = await caller.rpc(
+      "can_access_whatsapp_number",
+      { p_tenant_id: body.tenant_id, p_account_id: message.whatsapp_account_id },
+    );
+    if (accessError) throw accessError;
+    if (!permitted) throw new WhatsAppError("No tienes acceso a este número.", 403);
     if (
       !message.media_id || !["image", "sticker"].includes(message.message_type)
     ) {
