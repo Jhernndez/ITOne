@@ -33,9 +33,8 @@ class FlowVersion {
 class FlowRepository {
   FlowRepository(this.client);
   final SupabaseClient client;
-  Future<({String lookup, String reserve})> installAppointmentDemo(
-    String tenantId,
-  ) async {
+  Future<({String lookup, String reserve, String cancel})>
+  installAppointmentDemo(String tenantId) async {
     final response = await client.functions.invoke(
       'demo-appointments/instalar',
       body: {'tenant_id': tenantId},
@@ -49,6 +48,7 @@ class FlowRepository {
     return (
       lookup: data['lookup_id'] as String,
       reserve: data['reserve_id'] as String,
+      cancel: data['cancel_id'] as String,
     );
   }
 

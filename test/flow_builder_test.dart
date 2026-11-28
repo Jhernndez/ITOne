@@ -37,12 +37,15 @@ class _Repository extends FlowRepository {
   bool protected = false;
   int demoInstalls = 0;
   @override
-  Future<({String lookup, String reserve})> installAppointmentDemo(
-    String tenantId,
-  ) async {
+  Future<({String lookup, String reserve, String cancel})>
+  installAppointmentDemo(String tenantId) async {
     demoInstalls++;
     tenant = tenantId;
-    return (lookup: 'lookup-resource', reserve: 'reserve-resource');
+    return (
+      lookup: 'lookup-resource',
+      reserve: 'reserve-resource',
+      cancel: 'cancel-resource',
+    );
   }
 
   @override

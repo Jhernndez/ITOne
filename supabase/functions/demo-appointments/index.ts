@@ -59,10 +59,10 @@ export async function demoAppointments(request: Request): Promise<Response> {
       }
       return json({ok: true, ...data});
     }
-    if (action !== "buscar" && action !== "reservar" && !(action === "demo-appointments" && request.method === "GET")) {
+    if (!["buscar", "reservar", "cancelar"].includes(action ?? "") && !(action === "demo-appointments" && request.method === "GET")) {
       throw new WhatsAppError("Operación no disponible", 404);
     }
-    if ((action === "buscar" || action === "reservar") && request.method !== "POST") {
+    if (action !== "demo-appointments" && request.method !== "POST") {
       throw new WhatsAppError("Método no permitido", 405);
     }
     const key = request.headers.get("x-demo-key");
@@ -70,7 +70,7 @@ export async function demoAppointments(request: Request): Promise<Response> {
     const admin = createClient(url, serviceKey);
     const {data, error} = await admin.rpc("run_demo_appointments", {
       p_key: key, p_action: action === "demo-appointments" ? "salud" : action, p_body: input,
-      p_idempotency_key: action === "reservar"
+      p_idempotency_key: action === "reservar" || action === "cancelar"
         ? request.headers.get("idempotency-key") ?? crypto.randomUUID()
         : null,
     });

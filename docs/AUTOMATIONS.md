@@ -41,6 +41,8 @@ El botón **Probar automatización** no llama a la API ni reserva: usa respuesta
 
 El bloque API ofrece **Configurar datos visualmente** para asociar nombres de parámetros con texto fijo o variables del flujo. El modo JSON sigue disponible para estructuras o tipos avanzados. Las opciones dinámicas seleccionan una lista de la respuesta, el campo a mostrar y el identificador que se guardará; sus salidas son **Siguiente** y **Sin opciones**. La lista y sus campos dependen del contrato de cada API y no se descubren automáticamente.
 
+Tras instalar o reinstalar la demo, **Agenda** muestra los horarios ficticios y los pacientes asignados para esa empresa; el botón de actualización vuelve a consultar los datos. El flujo nuevo permite programar o reprogramar, y también cancelar. Los nombres de pacientes y profesionales son inventados y las identificaciones usan el prefijo `DEMO-`; la agenda no consulta ni modifica la plataforma de una IPS. Los flujos guardados anteriormente no cambian: crea un nuevo borrador de demo para utilizar la opción de cancelación.
+
 ## Control humano y límites
 
 Responder desde ITONE o WhatsApp Business móvil pausa la conversación. También puedes pulsar **Tomar conversación**. La pausa se conserva hasta **Reactivar bot**, que descarta el recorrido y espera un nuevo mensaje. Las respuestas móviles dependen de recibir el webhook de ecos de Meta.

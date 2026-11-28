@@ -8,6 +8,7 @@ import 'services/browser_notifications.dart';
 import 'services/whatsapp_signup.dart';
 import 'features/tenant_users/tenant_users_panel.dart';
 import 'features/automations/flow_builder.dart';
+import 'features/automations/demo_agenda.dart';
 import 'features/automations/bot_controls.dart';
 import 'features/external_api/external_api_panel.dart';
 import 'features/whatsapp/whatsapp_connection_header.dart';
@@ -2613,7 +2614,8 @@ class _TenantModuleContent extends StatelessWidget {
                 ],
                 if (module.label == 'Clientes') const _DemoClientsPage(),
                 if (module.label == 'Tickets') const _DemoTicketsPage(),
-                if (module.label == 'Agenda') const _DemoAgendaPage(),
+                if (module.label == 'Agenda')
+                  DemoAgenda(key: ValueKey(tenant['id']), tenantId: tenant['id'] as String),
                 if (module.label == 'Reportes') const _DemoReportsPage(),
                 if (isUsers)
                   TenantUsersPanel(
@@ -3062,75 +3064,6 @@ class _DemoTicketsPage extends StatelessWidget {
                   ),
                 ),
             ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DemoAgendaPage extends StatelessWidget {
-  const _DemoAgendaPage();
-
-  static const _appointments = [
-    ('09:00', 'Seguimiento de servicio', 'Carlos Rodríguez', 'Confirmada'),
-    ('11:30', 'Consulta inicial', 'María González', 'Confirmada'),
-    ('15:00', 'Revisión de ticket #1042', 'Andrés Martínez', 'Pendiente'),
-    ('16:30', 'Llamada de renovación', 'Laura Pérez', 'Pendiente'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const _DemoModeBanner(),
-        const SizedBox(height: 16),
-        Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Agenda de hoy · 24 de septiembre',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nueva cita'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                for (final appointment in _appointments)
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    elevation: 0,
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: ListTile(
-                      leading: Text(
-                        appointment.$1,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      title: Text(appointment.$2),
-                      subtitle: Text(appointment.$3),
-                      trailing: Chip(
-                        label: Text(appointment.$4),
-                        visualDensity: VisualDensity.compact,
-                        side: BorderSide.none,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
           ),
         ),
       ],

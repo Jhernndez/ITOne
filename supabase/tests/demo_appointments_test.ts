@@ -17,21 +17,28 @@ Deno.test("demo appointments isolate tenants, reserve atomically and never use r
       create table tenant_api_resources(id uuid primary key default gen_random_uuid(),tenant_id uuid,
         integration_id uuid,name text,path text,http_method text,enabled boolean,
         enabled_for_automation boolean,allow_automation_writes boolean);
+      create function current_tenant_role(p_tenant uuid) returns text language sql as $$
+        select case when p_tenant::text = current_setting('app.tenant', true) then 'tenant_admin' else null end
+      $$;
       insert into tenants values('${tenant1}'),('${tenant2}');
     `);
     await db.exec(await Deno.readTextFile(new URL("../migrations/20261127182000_demo_appointments.sql", import.meta.url)));
+    await db.exec(await Deno.readTextFile(new URL("../migrations/20261127183000_demo_agenda.sql", import.meta.url)));
     await db.exec("set role service_role");
     const install = (tenant: string, key: string) => query("select install_demo_appointments($1,$2,$3)", [tenant,"https://demo.supabase.co/functions/v1/demo-appointments",key]);
     await install(tenant1,key1);
     await install(tenant2,key2);
     await install(tenant1,key1);
+    await query("select set_config('app.tenant',$1,false)", [tenant1]);
     const run = async (key: string, action: string, data: object, idem: string | null = null) =>
       (await query("select run_demo_appointments($1,$2,$3,$4) as result", [key,action,JSON.stringify(data),idem])).rows[0].result as {status:number; body: Record<string, unknown>};
     await assert.rejects(run("invalid","buscar",{}),/Credencial/);
     assert.equal((await run(key1,"buscar",{cedula:"123456789"})).status,404);
     const lookup = await run(key1,"buscar",{cedula:"DEMO-001"});
+    assert.equal(lookup.body.paciente, "Ana Ejemplo");
     const slots = lookup.body.horarios as {id:string;nombre:string}[];
     assert.equal(slots.length,3);
+    assert.match(slots[0].nombre, /Ejemplo/);
     assert.equal((await run(key2,"reservar",{cedula:"DEMO-001",horario:slots[0].id},"foreign")).status,409);
     const request = {cedula:"DEMO-001",horario:slots[0].id};
     const booked = await run(key1,"reservar",request,"booking-1");
@@ -42,6 +49,18 @@ Deno.test("demo appointments isolate tenants, reserve atomically and never use r
     assert.equal((await run(key1,"reservar",{cedula:"DEMO-001",horario:slots[0].id},"unavailable")).status,409);
     assert.equal((await run(key1,"reservar",{cedula:"DEMO-001",horario:slots[1].id},"change")).status,200);
     assert.equal((await run(key1,"reservar",{cedula:"DEMO-002",horario:slots[0].id},"new-booking")).status,200);
+    assert.equal((await run(key1,"buscar",{cedula:"DEMO-001"})).body.cita !== null, true);
+    const cancellation = await run(key1,"cancelar",{cedula:"DEMO-001"},"cancel-1");
+    assert.equal(cancellation.status,200);
+    assert.deepEqual(await run(key1,"cancelar",{cedula:"DEMO-001"},"cancel-1"),cancellation);
+    assert.equal((await run(key1,"cancelar",{cedula:"DEMO-001"},"cancel-2")).status,404);
+    assert.equal((await run(key1,"buscar",{cedula:"DEMO-001"})).body.cita, null);
+    await db.exec("reset role; set role authenticated");
+    const agenda = (await query("select list_demo_agenda($1) as result", [tenant1])).rows[0].result as {installed: boolean; appointments: {patient: string | null}[]};
+    assert.equal(agenda.installed, true);
+    assert.equal(agenda.appointments.some((a) => a.patient === "Luis Ejemplo"), true);
+    await assert.rejects(query("select list_demo_agenda($1)", [tenant2]), /Acceso no disponible/);
+    await db.exec("reset role; set role service_role");
     const graph: RuntimeGraph = {
       schema:1,
       nodes:[

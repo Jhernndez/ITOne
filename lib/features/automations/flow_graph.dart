@@ -203,7 +203,11 @@ class FlowGraph {
     [const FlowEdge('start', 'Siguiente', 'end')],
   );
 
-  factory FlowGraph.demoAppointments(String lookupId, String reserveId) {
+  factory FlowGraph.demoAppointments(
+    String lookupId,
+    String reserveId, [
+    String? cancelId,
+  ]) {
     FlowNode n(
       String id,
       FlowKind kind,
@@ -226,8 +230,14 @@ class FlowGraph {
           'body': '{"cedula":"{{cedula}}"}',
           'result_variable': 'agenda',
           'result_path': '',
-          'simulation_response': '{"body":{"horarios":[{"id":"DEMO-H1","nombre":"Lunes 09:00"},{"id":"DEMO-H2","nombre":"Martes 10:00"},{"id":"DEMO-H3","nombre":"Miércoles 11:00"}]}}',
+          'simulation_response': '{"body":{"paciente":"Ana Ejemplo","horarios":[{"id":"DEMO-H1","nombre":"Lunes 09:00"},{"id":"DEMO-H2","nombre":"Martes 10:00"},{"id":"DEMO-H3","nombre":"Miércoles 11:00"}]}}',
         }),
+        if (cancelId != null)
+          n('action', FlowKind.options, 740, 300, {
+            'text': 'Hola {{agenda.body.paciente}}. ¿Qué deseas hacer con tu cita ficticia?',
+            'variable': 'accion',
+            'options': 'Programar o reprogramar|Cancelar cita',
+          }),
         n('choice', FlowKind.options, 880, 100, {
           'title': 'Escoger horario ficticio',
           'text': 'Selecciona un horario de prueba:',
@@ -255,11 +265,32 @@ class FlowGraph {
           'text': 'No encontramos el paciente ficticio o no hay horarios disponibles. Pasaremos a atención humana.',
         }),
         n('human', FlowKind.handoff, 1160, 450, {}),
+        if (cancelId != null) ...[
+          n('cancel', FlowKind.api, 1160, 700, {
+            'title': 'Cancelar cita ficticia',
+            'resource_id': cancelId,
+            'query': '{}',
+            'body': '{"cedula":"{{cedula}}"}',
+            'result_variable': 'cancelacion',
+            'simulation_response':
+                '{"body":{"mensaje":"Cita ficticia cancelada."}}',
+          }),
+          n('cancel-success', FlowKind.text, 1440, 700, {
+            'text': '{{cancelacion.body.mensaje}} No es una cita real.',
+          }),
+        ],
       ],
       [
         const FlowEdge('start', 'Siguiente', 'patient'),
         const FlowEdge('patient', 'Siguiente', 'search'),
-        const FlowEdge('search', 'Éxito', 'choice'),
+        FlowEdge('search', 'Éxito', cancelId == null ? 'choice' : 'action'),
+        if (cancelId != null) ...[
+          const FlowEdge('action', 'Programar o reprogramar', 'choice'),
+          const FlowEdge('action', 'Cancelar cita', 'cancel'),
+          const FlowEdge('cancel', 'Éxito', 'cancel-success'),
+          const FlowEdge('cancel', 'Error', 'failure'),
+          const FlowEdge('cancel-success', 'Siguiente', 'end'),
+        ],
         const FlowEdge('search', 'Error', 'failure'),
         const FlowEdge('choice', 'Siguiente', 'book'),
         const FlowEdge('choice', 'Sin opciones', 'failure'),

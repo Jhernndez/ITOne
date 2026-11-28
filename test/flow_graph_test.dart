@@ -30,6 +30,22 @@ void main() {
       expect(empty.finished, isTrue);
     },
   );
+  test('appointment demo can cancel or reschedule after patient lookup', () {
+    final graph = FlowGraph.demoAppointments('lookup', 'reserve', 'cancel');
+    expect(graph.validate(), isEmpty);
+    final cancel = FlowRun(graph)
+      ..answer('DEMO-001')
+      ..answer('Éxito')
+      ..answer('Cancelar cita')
+      ..answer('Éxito');
+    expect(cancel.finished, isTrue);
+    expect(cancel.messages.last.text, contains('cancelada'));
+    final reserve = FlowRun(graph)
+      ..answer('DEMO-001')
+      ..answer('Éxito')
+      ..answer('Programar o reprogramar');
+    expect(reserve.dynamicChoices, hasLength(3));
+  });
   test(
     'accepts 60 connected blocks and enforces size and connection limits',
     () {

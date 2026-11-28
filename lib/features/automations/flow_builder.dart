@@ -260,6 +260,7 @@ class _FlowBuilderState extends State<FlowBuilder> {
         _graph = FlowGraph.demoAppointments(
           resources.lookup,
           resources.reserve,
+          resources.cancel,
         );
         _selected = null;
         _connecting = null;
